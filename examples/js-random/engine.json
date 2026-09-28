@@ -1,0 +1,6 @@
+{
+  "protocol": 1,
+  "name": "js-random",
+  "cmd": "node engines/random.js",
+  "description": "Plays a uniformly random legal move, built on the reference rules module."
+}

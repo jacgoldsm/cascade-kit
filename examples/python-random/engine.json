@@ -1,0 +1,6 @@
+{
+  "protocol": 1,
+  "name": "python-random",
+  "cmd": "python engine.py",
+  "description": "Plays a uniformly random legal move. A template for engines in other languages."
+}

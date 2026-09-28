@@ -1,0 +1,20 @@
+{
+  "rules": {
+    "side": 5,
+    "collapse": 6,
+    "maxply": 150,
+    "komi": 0.5
+  },
+  "movetime": 1000,
+  "hardware": "Intel N100 (4 cores, 4 threads, 0.8 GHz base / 3.4 GHz boost), 16 GB RAM, Intel UHD integrated graphics (no CUDA GPU)",
+  "os": "Windows 11 Home, 64-bit (builds run through cmd.exe)",
+  "runtimes": [
+    "node (Node.js 24.11)",
+    "python (Python 3.13.6, standard library only)",
+    "No C, C++, Rust, Go, Java or .NET compilers are installed."
+  ],
+  "buildTimeoutSec": 600,
+  "buildNetwork": false,
+  "hiddenVariant": false,
+  "developmentTime": "your session"
+}
