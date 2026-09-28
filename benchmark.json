@@ -5,13 +5,16 @@
     "maxply": 150,
     "komi": 0.5
   },
-  "movetime": 1000,
-  "hardware": "Intel N100 (4 cores, 4 threads, 0.8 GHz base / 3.4 GHz boost), 16 GB RAM, Intel UHD integrated graphics (no CUDA GPU)",
-  "os": "Windows 11 Home, 64-bit (builds run through cmd.exe)",
+  "movetime": 250,
+  "hardware": "1 CPU core and 1 GB RAM per engine, in a Docker container on a GitHub Actions ubuntu-24.04 runner (x86-64); no GPU",
+  "engineCpus": 1,
+  "engineMemoryMb": 1024,
+  "os": "Linux (Debian 12 container image defined by docker/Dockerfile); builds run through sh",
   "runtimes": [
-    "node (Node.js 24.11)",
-    "python (Python 3.13.6, standard library only)",
-    "No C, C++, Rust, Go, Java or .NET compilers are installed."
+    "node (Node.js 22)",
+    "python / python3 (Python 3.11, standard library only)",
+    "gcc / g++ (GCC 12) and make",
+    "rustc / cargo (Rust 1.85, no crates.io access)"
   ],
   "buildTimeoutSec": 600,
   "buildNetwork": false,

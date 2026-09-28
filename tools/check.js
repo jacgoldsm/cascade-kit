@@ -3,7 +3,10 @@
 // from a clean copy of the directory, it completes the handshake, and it plays legal
 // moves within the time limit. It then plays a few games against the random engine.
 //
-//   node tools/check.js <submission-dir> [--games N] [--movetime MS] [--keep]
+//   node tools/check.js <submission-dir> [--games N] [--movetime MS] [--keep] [--docker IMAGE]
+//
+// With --docker, the build and the engine run in containers from IMAGE, with the
+// same limits as when scoring (see docker/Dockerfile to build the image).
 //
 // Conditions (time control, rules, build timeout) come from benchmark.json.
 // Exits with status 0 if the submission passes and 1 if it does not.
@@ -21,11 +24,12 @@ const RANDOM_ENGINE = `node "${path.join(ROOT, 'engines', 'random.js')}"`;
 const OTHER_VARIANT = { side: 6, collapse: 5, maxply: 120, komi: 1.5 };
 
 function parseArgs(argv) {
-  const opts = { dir: null, games: 2, movetime: null, keep: false };
+  const opts = { dir: null, games: 2, movetime: null, keep: false, image: null };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--games') opts.games = Number(argv[++i]);
     else if (argv[i] === '--movetime') opts.movetime = Number(argv[++i]);
     else if (argv[i] === '--keep') opts.keep = true;
+    else if (argv[i] === '--docker') opts.image = argv[++i];
     else opts.dir = argv[i];
   }
   return opts;
@@ -34,11 +38,12 @@ function parseArgs(argv) {
 async function main() {
   const opts = parseArgs(process.argv.slice(2));
   if (!opts.dir) {
-    console.error('usage: node tools/check.js <submission-dir> [--games N] [--movetime MS] [--keep]');
+    console.error('usage: node tools/check.js <submission-dir> [--games N] [--movetime MS] [--keep] [--docker IMAGE]');
     process.exit(2);
   }
   const bench = JSON.parse(fs.readFileSync(path.join(ROOT, 'benchmark.json'), 'utf8'));
   const movetime = opts.movetime || bench.movetime;
+  const docker = opts.image ? { image: opts.image, cpus: bench.engineCpus, memoryMb: bench.engineMemoryMb } : undefined;
   const problems = [];
   const fail = (msg) => { problems.push(msg); console.log('  FAIL ' + msg); };
 
@@ -58,7 +63,7 @@ async function main() {
   fs.cpSync(opts.dir, work, { recursive: true, filter: (src) => path.basename(src) !== '.git' });
   try {
     console.log(`build (copied to ${work})`);
-    const built = await build(work, manifest, 1000 * bench.buildTimeoutSec);
+    const built = await build(work, manifest, 1000 * bench.buildTimeoutSec, docker);
     if (!built.ok) {
       fail('build failed');
       console.log(built.output.trim().split('\n').map((l) => '    ' + l).join('\n'));
@@ -68,7 +73,7 @@ async function main() {
 
     // 3. Handshake.
     console.log('handshake');
-    const spec = { name: manifest.name, cmd: manifest.cmd, cwd: work, go: `movetime ${movetime}` };
+    const spec = { name: manifest.name, cmd: manifest.cmd, cwd: work, go: `movetime ${movetime}`, docker };
     const probe = new EngineProcess(spec);
     const t0 = performance.now();
     const ready = await probe.handshake();

@@ -55,9 +55,6 @@ async function main() {
     console.log(`building submission ${entry.submission} ...`);
     engines.push(await prepareSubmission(entry, 1000 * Number(config.buildTimeoutSec ?? 600)));
   }
-  const byName = new Map(engines.map((e) => [e.name, e]));
-  if (byName.size !== engines.length) throw new Error('engine names must be unique');
-
   const pairings = [];
   for (let i = 0; i < engines.length; i++) {
     for (let j = i + 1; j < engines.length; j++) {
@@ -67,10 +64,29 @@ async function main() {
   }
 
   fs.mkdirSync(out, { recursive: true });
-  const gamesFile = path.join(out, 'games.jsonl');
-  const games = fs.existsSync(gamesFile)
-    ? fs.readFileSync(gamesFile, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l))
+  const games = await runGames({
+    rules: config.rules || {}, engines, pairings, pairs, seed: seed0, concurrency,
+    gamesFile: path.join(out, 'games.jsonl'),
+  });
+  if (!games.length) return;
+  const summary = report(games, config.anchor || engines[0].name);
+  fs.writeFileSync(path.join(out, 'summary.txt'), summary + '\n');
+  console.log('\n' + summary);
+}
+
+function readGames(file) {
+  return fs.existsSync(file)
+    ? fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l))
     : [];
+}
+
+// Plays `pairs` colour-swapped game pairs for every pairing [nameA, nameB], using
+// opening seeds seed, seed + 1, .... Games already in gamesFile are kept and not
+// replayed; new games are appended to it as they finish. Returns all the games.
+async function runGames({ rules, engines, pairings, pairs, seed, concurrency, gamesFile, log = console.log }) {
+  const byName = new Map(engines.map((e) => [e.name, e]));
+  if (byName.size !== engines.length) throw new Error('engine names must be unique');
+  const games = readGames(gamesFile);
   const done = new Set(games.map((g) => `${g.white}|${g.black}|${g.seed}`));
 
   // Interleave pairings so partial results cover every pairing evenly.
@@ -78,7 +94,7 @@ async function main() {
   for (let k = 0; k < pairs; k++) {
     for (const [a, b] of pairings) {
       for (const [w, bl] of [[a, b], [b, a]]) {
-        if (!done.has(`${w}|${bl}|${seed0 + k}`)) jobs.push({ white: w, black: bl, seed: seed0 + k });
+        if (!done.has(`${w}|${bl}|${seed + k}`)) jobs.push({ white: w, black: bl, seed: seed + k });
       }
     }
   }
@@ -86,14 +102,14 @@ async function main() {
   const total = jobs.length;
   let finished = 0;
   const started = Date.now();
-  console.log(`${pairings.length} pairings x ${pairs} pairs: ${total} games to play (${games.length} already done), ` +
+  log(`${pairings.length} pairings x ${pairs} pairs: ${total} games to play (${games.length} already done), ` +
     `concurrency ${concurrency}, writing ${gamesFile}`);
 
   async function worker() {
     while (jobs.length) {
       const job = jobs.shift();
       const record = await playGame({
-        rules: config.rules || {}, seed: job.seed, white: byName.get(job.white), black: byName.get(job.black),
+        rules, seed: job.seed, white: byName.get(job.white), black: byName.get(job.black),
       });
       games.push(record);
       fs.appendFileSync(gamesFile, JSON.stringify(record) + '\n');
@@ -101,16 +117,14 @@ async function main() {
       const eta = ((Date.now() - started) / finished) * (total - finished) / 1000;
       const winner = record.winner === 'white' ? record.white : record.black;
       const score = record.score ? ` ${record.score[0]}-${record.score[1]}` : '';
-      console.log(`[${finished}/${total}] seed ${job.seed} ${record.white} vs ${record.black}: ` +
+      log(`[${finished}/${total}] seed ${job.seed} ${record.white} vs ${record.black}: ` +
         `${winner} wins (${record.reason}${score}, ${record.plies} plies) eta ${Math.round(eta)}s`);
     }
   }
   await Promise.all(Array.from({ length: Math.max(1, concurrency) }, worker));
-
-  if (!games.length) return;
-  const summary = report(games, config.anchor || engines[0].name);
-  fs.writeFileSync(path.join(out, 'summary.txt'), summary + '\n');
-  console.log('\n' + summary);
+  return games;
 }
 
-main().catch((err) => { console.error(err); process.exit(1); });
+if (require.main === module) main().catch((err) => { console.error(err); process.exit(1); });
+
+module.exports = { runGames, readGames };

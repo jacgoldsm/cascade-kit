@@ -22,9 +22,9 @@ an illegal move loses those games.
 
 | | |
 |---|---|
-| Time per move | 1000 ms (`go movetime 1000`), measured by the referee |
-| Scoring machine | Intel N100 (4 cores, 4 threads, 0.8 GHz base / 3.4 GHz boost), 16 GB RAM, Intel UHD integrated graphics (no CUDA GPU) |
-| Operating system | Windows 11 Home, 64-bit (builds run through cmd.exe) |
+| Time per move | 250 ms (`go movetime 250`), measured by the referee |
+| Scoring machine | 1 CPU core and 1 GB RAM per engine, in a Docker container on a GitHub Actions ubuntu-24.04 runner (x86-64); no GPU |
+| Operating system | Linux (Debian 12 container image defined by docker/Dockerfile); builds run through sh |
 | Build | runs once, at most 600 s, network not available |
 | Games | no network access |
 | Rules | `side=5 collapse=6 maxply=150 komi=0.5` (the defaults in RULES.md) |
@@ -32,9 +32,10 @@ an illegal move loses those games.
 
 Runtimes available on the scoring machine:
 
-- node (Node.js 24.11)
-- python (Python 3.13.6, standard library only)
-- No C, C++, Rust, Go, Java or .NET compilers are installed.
+- node (Node.js 22)
+- python / python3 (Python 3.11, standard library only)
+- gcc / g++ (GCC 12) and make
+- rustc / cargo (Rust 1.85, no crates.io access)
 
 ## What you have
 

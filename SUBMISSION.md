@@ -32,20 +32,25 @@ Other keys are ignored.
 
 ## How a submission is run
 
-1. **Build.** If `build` is present, it runs through the scoring machine's shell
-   (`sh -c` on Linux, `cmd.exe` on Windows; see `os` in `benchmark.json`) in the
-   submission directory. It must exit with status 0 within the build timeout in
-   `benchmark.json`. `buildNetwork` there says whether the network is available
-   during the build. If it is not, vendor your dependencies.
-2. **Games.** For each game, the referee starts a fresh process from `cmd` with the
-   submission directory as its working directory, and speaks the protocol in
-   PROTOCOL.md over stdin/stdout. `cmd` is split into words, and double or single
-   quotes group words. It is **not** run through a shell, so pipes, redirects,
-   `&&` and environment-variable assignments do not work. If you need any of those,
-   put them in a script and make `cmd` run the script.
-3. **Isolation.** Games have no network access. Several games may run at the same
-   time, and each engine may be stopped at any moment. Do not rely on files written
-   during one game being there in another.
+Submissions are built and played in Docker containers made from the image in
+`docker/Dockerfile` (Linux, with the runtimes listed in `benchmark.json`).
+
+1. **Build.** If `build` is present, it runs once through `sh -c` in a container,
+   with the submission directory mounted read-write as the working directory. It
+   must exit with status 0 within the build timeout in `benchmark.json`. The build
+   has no network access (`buildNetwork`), so vendor any dependencies.
+2. **Games.** For each game, the referee starts a fresh container that runs `cmd`
+   with the submission directory as its working directory, and speaks the protocol
+   in PROTOCOL.md over stdin/stdout. `cmd` is split into words, and double or
+   single quotes group words. It is **not** run through a shell, so pipes,
+   redirects, `&&` and environment-variable assignments do not work. If you need
+   any of those, put them in a script and make `cmd` run the script.
+3. **Limits.** Each engine gets the CPU and memory in `benchmark.json`
+   (`engineCpus`, `engineMemoryMb`) and no swap. It runs as a non-root user with
+   no network. The submission directory is **read-only** during games; `/tmp` is
+   writable (256 MB) and is where `HOME` points. Several games run at the same
+   time, and each engine may be stopped at any moment, so do not rely on files
+   written during one game being there in another.
 
 An engine that fails to build, fails the handshake, crashes, times out or plays an
 illegal move loses (see PROTOCOL.md). A build failure loses every game.
@@ -63,18 +68,35 @@ engine's slowest moves, then prints `PASS` or `FAIL`. Options: `--games N` (defa
 2), `--movetime MS` to test at a different time control, and `--keep` to keep the
 build directory for inspection.
 
+To check in the scoring environment itself, with Docker installed:
+
+```
+docker build -t cascade-runtime:local docker
+node tools/check.js path/to/submission --docker cascade-runtime:local
+```
+
+This runs the build and the engine in containers with the same limits as scoring,
+so it also catches missing runtimes and writes to the read-only directory.
+
 A `PASS` means the submission is valid, not that it is strong. The check machine may
 also be faster than the scoring machine, so leave headroom on time.
 
 ## For benchmark operators
 
-Tournament configs accept submissions directly:
+Commit a submission as `submissions/<name>/` in the main repository and push. The
+**Score submissions** workflow scores every changed submission against the ladder in
+`configs/scoring.json`, then commits `scores/<name>/` and updates `LEADERBOARD.md`.
+It can also be run by hand from the Actions tab, for one submission or all of them.
+Scoring fits each submission together with the ladder's calibration games in
+`calibration/`, so run the **Calibrate ladder** workflow first, and again after
+changing the ladder or `benchmark.json`. The same steps run locally with
+`node tools/score.js --calibrate` and `node tools/score.js submissions/<name>`.
+
+Tournament configs also accept submissions directly:
 
 ```json
-{ "submission": "submissions/model-x", "go": "movetime 1000" }
+{ "submission": "submissions/model-x", "go": "movetime 250",
+  "docker": { "image": "cascade-runtime:local", "cpus": 1, "memoryMb": 1024 } }
 ```
 
-`referee/tournament.js` builds each submission once, then uses its `cmd` with the
-submission directory as the working directory. The referee does not sandbox engines.
-The CPU, memory and network limits in `benchmark.json` must be enforced by the
-machine or container the tournament runs in.
+Without `docker`, the referee runs engines directly on the machine, unsandboxed.

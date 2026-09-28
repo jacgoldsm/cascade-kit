@@ -5,6 +5,7 @@
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
+const { dockerLimits } = require('./match');
 
 const MANIFEST = 'engine.json';
 const KNOWN_KEYS = new Set(['protocol', 'name', 'cmd', 'build', 'description', 'authors']);
@@ -39,19 +40,26 @@ function loadManifest(dir) {
   return { manifest: errors.length ? null : m, errors, warnings };
 }
 
-// Runs the manifest's build command (through the shell) in dir.
+// Runs the manifest's build command (through the shell) in dir, or with docker
+// ({ image, cpus, memoryMb }) through `sh -c` in a container that has dir mounted
+// read-write at /engine and no network.
 // Resolves to { ok, ms, output } where output is the tail of stdout and stderr.
-function build(dir, manifest, timeoutMs) {
+function build(dir, manifest, timeoutMs, docker) {
   if (!manifest.build) return Promise.resolve({ ok: true, ms: 0, output: '' });
   const start = Date.now();
+  const container = `cascade-build-${process.pid}-${Date.now()}`;
   return new Promise((resolve) => {
-    const child = spawn(manifest.build, { cwd: dir, shell: true, windowsHide: true });
+    const child = docker
+      ? spawn('docker', ['run', '--rm', '--name', container, ...dockerLimits(docker),
+        '-v', `${path.resolve(dir)}:/engine`, '-w', '/engine', docker.image, 'sh', '-c', manifest.build])
+      : spawn(manifest.build, { cwd: dir, shell: true, windowsHide: true });
     let output = '';
     const collect = (chunk) => { output = (output + chunk).slice(-8000); };
     child.stdout.on('data', collect);
     child.stderr.on('data', collect);
     const timer = setTimeout(() => {
       output += `\n[build killed after ${timeoutMs} ms]`;
+      if (docker) spawn('docker', ['rm', '-f', container], { stdio: 'ignore' });
       child.kill();
     }, timeoutMs);
     child.on('error', (err) => { output += '\n' + err.message; });
@@ -69,7 +77,7 @@ async function prepareSubmission(entry, buildTimeoutMs) {
   const dir = path.resolve(entry.submission);
   const { manifest, errors } = loadManifest(dir);
   if (!manifest) throw new Error(`submission ${dir}: ${errors.join('; ')}`);
-  const result = await build(dir, manifest, buildTimeoutMs);
+  const result = await build(dir, manifest, buildTimeoutMs, entry.docker);
   if (!result.ok) throw new Error(`submission ${dir}: build failed\n${result.output}`);
   return { ...entry, name: entry.name || manifest.name, cmd: manifest.cmd, cwd: dir };
 }

@@ -21,6 +21,10 @@ to standard error is ignored.
 
 Unknown commands must be ignored.
 
+Engines may only use the CPU between receiving `go` and replying `bestmove`. Thinking
+on the opponent's time ("pondering"), or doing any other work between moves, is not
+allowed: engines share the scoring machine.
+
 ## Engine → referee
 
 | Reply              | Meaning |

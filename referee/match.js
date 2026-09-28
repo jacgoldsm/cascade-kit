@@ -2,6 +2,7 @@
 // Runs engine processes and plays refereed games between them (see PROTOCOL.md).
 
 const { spawn } = require('child_process');
+const path = require('path');
 const readline = require('readline');
 const { performance } = require('perf_hooks');
 const { Cascade, optionsToString, WHITE } = require('../cascade/rules');
@@ -24,10 +25,47 @@ function moveLimitMs(spec) {
   return Math.ceil(t * (spec.graceFactor ?? 1.1) + (spec.graceMs ?? 250));
 }
 
+let containerCount = 0;
+
+// Options shared by engine and build containers: no network, a CPU and memory
+// allowance, no swap, a process limit, no capabilities, and the host user's uid
+// (so files a build writes into the mounted directory stay owned by that user).
+function dockerLimits(docker) {
+  const args = [
+    '--network', 'none',
+    '--cpus', String(docker.cpus),
+    '--memory', `${docker.memoryMb}m`, '--memory-swap', `${docker.memoryMb}m`,
+    '--pids-limit', '256',
+    '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges',
+    '-e', 'HOME=/tmp', '-e', 'CARGO_HOME=/tmp/.cargo',
+  ];
+  if (process.getuid) args.push('--user', `${process.getuid()}:${process.getgid()}`);
+  return args;
+}
+
+// The argv that runs `cmd` in `dir` inside a container. The directory is mounted
+// read-only at /engine and the root filesystem is read-only; /tmp is a small tmpfs.
+function dockerEngineArgv(docker, dir, cmd, name) {
+  return [
+    'docker', 'run', '--rm', '-i', '--name', name,
+    ...dockerLimits(docker),
+    '--read-only', '--tmpfs', '/tmp:rw,exec,size=256m',
+    '-v', `${path.resolve(dir)}:/engine:ro`, '-w', '/engine',
+    docker.image, ...splitCommand(cmd),
+  ];
+}
+
 class EngineProcess {
+  // spec: { name, cmd, cwd?, go, docker? }. With docker: { image, cpus, memoryMb },
+  // the engine runs in a container instead of directly on this machine.
   constructor(spec) {
     this.spec = spec;
-    const [exe, ...args] = splitCommand(spec.cmd);
+    let argv = splitCommand(spec.cmd);
+    if (spec.docker) {
+      this.container = `cascade-${process.pid}-${++containerCount}`;
+      argv = dockerEngineArgv(spec.docker, spec.cwd || process.cwd(), spec.cmd, this.container);
+    }
+    const [exe, ...args] = argv;
     this.child = spawn(exe, args, { cwd: spec.cwd, stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true });
     this.lines = [];
     this.waiter = null;
@@ -81,7 +119,11 @@ class EngineProcess {
     this.send('quit');
     if (this.exited) return Promise.resolve();
     return new Promise((resolve) => {
-      const timer = setTimeout(() => this.child.kill(), 1000);
+      const timer = setTimeout(() => {
+        // Killing the `docker run` client does not stop its container.
+        if (this.container) spawn('docker', ['rm', '-f', this.container], { stdio: 'ignore' });
+        this.child.kill();
+      }, 1000);
       const done = () => { clearTimeout(timer); resolve(); };
       this.child.once('exit', done);
       this.child.once('error', done);
@@ -142,4 +184,4 @@ async function playGame({ rules, seed, white, black }) {
   }
 }
 
-module.exports = { playGame, EngineProcess, splitCommand, moveLimitMs };
+module.exports = { playGame, EngineProcess, splitCommand, moveLimitMs, dockerLimits };

@@ -10,6 +10,7 @@ Everything needed to build and test an engine for the Cascade benchmark. Start w
 | `PROTOCOL.md`       | The text protocol between engines and the referee. |
 | `SUBMISSION.md`     | The `engine.json` manifest and how submissions are built and run. |
 | `benchmark.json`    | The scoring conditions, as read by `tools/check.js`. |
+| `docker/Dockerfile` | The Linux environment engines are built and scored in. |
 | `submission/`       | Where your engine goes. |
 | `examples/`         | Complete minimal submissions in JavaScript and Python. |
 | `cascade/rules.js`  | Reference rules implementation (JavaScript). |
@@ -19,12 +20,21 @@ Everything needed to build and test an engine for the Cascade benchmark. Start w
 
 The tools need Node.js 18 or later and have no dependencies.
 
+Scores for submitted engines are published in [leaderboard/](leaderboard/README.md).
+
 ## Quick start
 
 Check one of the examples:
 
 ```
 node tools/check.js examples/python-random
+```
+
+To check in the scoring environment itself (needs Docker):
+
+```
+docker build -t cascade-runtime:local docker
+node tools/check.js examples/python-random --docker cascade-runtime:local
 ```
 
 Start your own engine from an example:
