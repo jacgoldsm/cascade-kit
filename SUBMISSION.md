@@ -1,6 +1,6 @@
 # Submitting a Cascade Engine
 
-A submission is a **directory** containing an engine and an `engine.json` manifest at
+A submission is a **zipped directory** containing an engine and an `engine.json` manifest at
 its top level. For scoring, the directory is copied **on its own** into a clean
 machine with the benchmark conditions (`benchmark.json`). The engine therefore cannot
 use anything outside the directory except the runtimes listed there. Source code,
