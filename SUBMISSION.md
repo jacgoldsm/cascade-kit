@@ -78,10 +78,33 @@ node tools/check.js path/to/submission --docker cascade-runtime:local
 This runs the build and the engine in containers with the same limits as scoring,
 so it also catches missing runtimes and writes to the read-only directory.
 
+## Packing a submission
+
+```
+node tools/pack.js path/to/submission
+```
+
+This runs the check above and, if it passes, writes `cascade-submission.tar.gz`:
+the directory's files (without `.git`) with `engine.json` at the top level, at
+most 1 GiB unpacked. It prints the archive's SHA-256, which identifies exactly what
+was handed in. `--out FILE` writes somewhere else. Archives may contain only
+regular files: no symbolic links.
+
 A `PASS` means the submission is valid, not that it is strong. The check machine may
 also be faster than the scoring machine, so leave headroom on time.
 
 ## For benchmark operators
+
+To add a packed submission, unpack it into `submissions/<name>/` of the main
+repository, then commit and push:
+
+```
+node tools/add-submission.js cascade-submission.tar.gz <name>
+```
+
+It validates the archive and its `engine.json` before writing anything, rejects
+paths outside the directory, and will not overwrite an existing submission unless
+given `--replace`.
 
 Commit a submission as `submissions/<name>/` in the main repository and push. The
 **Score submissions** workflow scores every changed submission against the ladder in

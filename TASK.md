@@ -7,16 +7,21 @@ to.
 
 ## What to deliver
 
-Put your engine in the `submission/` directory, with an `engine.json` manifest, as
-described in `SUBMISSION.md`. The directory is copied on its own to the scoring
-machine, so it must contain everything the engine needs. Before you finish, run:
+Build your engine in the `submission/` directory, with an `engine.json` manifest,
+as described in `SUBMISSION.md`. The directory is unpacked on its own on the
+scoring machine, so it must contain everything the engine needs. When it is
+ready, run:
 
 ```
-node tools/check.js submission
+node tools/pack.js submission
 ```
 
-It must print `PASS`. A submission that fails to build, crashes, times out or plays
-an illegal move loses those games.
+This checks the submission (the same checks as `node tools/check.js submission`,
+which must print `PASS`) and then writes **`cascade-submission.tar.gz`** in the
+current directory. **That file is your deliverable**: it is the only thing
+collected, so anything not in it is not scored. Run `pack` again after every
+change you want included. A submission that fails to build, crashes, times out or
+plays an illegal move loses those games.
 
 ## Conditions
 
@@ -48,6 +53,7 @@ Runtimes available on the scoring machine:
   versions of your engine against each other.
 - `engines/random.js`: a random engine, and `examples/`: minimal complete
   submissions in JavaScript and Python to start from.
+- `tools/check.js`: checks a submission, and `tools/pack.js`: checks and packs it.
 - `tools/replay.js`: prints a recorded game move by move.
 
 Games in the benchmark are played in pairs from the same seeded opening, with

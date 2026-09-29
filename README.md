@@ -16,7 +16,7 @@ Everything needed to build and test an engine for the Cascade benchmark. Start w
 | `cascade/rules.js`  | Reference rules implementation (JavaScript). |
 | `engines/random.js` | A random engine, and `engines/lib/protocol.js`, a protocol helper. |
 | `referee/`          | The referee and tournament runner used for scoring. |
-| `tools/`            | `check.js` (validate a submission), `replay.js`, `stats.js`. |
+| `tools/`            | `check.js` (validate a submission), `pack.js` (check and pack it for handing in), `replay.js`, `stats.js`. |
 
 The tools need Node.js 18 or later and have no dependencies.
 
@@ -42,6 +42,12 @@ Start your own engine from an example:
 ```
 cp -r examples/js-random/* submission/
 node tools/check.js submission
+```
+
+When it is ready, pack it into `cascade-submission.tar.gz`, the file you hand in:
+
+```
+node tools/pack.js submission
 ```
 
 Play two engines against each other, e.g. a new version of yours against an old
