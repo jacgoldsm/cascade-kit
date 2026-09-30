@@ -1,6 +1,6 @@
-## opus-5.5-max: Elo 1389 [1293, 1486]
+## opus-5.5-max: Elo 1407 [1341, 1498]
 
-160 games against the ladder at 250 ms per move; scored 100.0%. Moves took 222 ms on average, 268 ms at most.
+200 games against the ladder at 250 ms per move; scored 100.0%. Moves took 220 ms on average, 268 ms at most.
 
 
 | Opponent | Wins |
@@ -9,17 +9,19 @@
 | mcts-250ms | 40/40 |
 | ab-25ms | 40/40 |
 | ab-250ms | 40/40 |
+| sonnet-4.6-high | 40/40 |
 
 <details><summary>All ratings (with calibration games)</summary>
 
 | Engine | Elo | 95% interval | Games | Score |
 |---|---:|---|---:|---:|
-| **opus-5.5-max** | 1389 | [1293, 1486] | 160 | 100.0% |
-| ab-250ms | 850 | [757, 956] | 160 | 73.8% |
-| ab-25ms | 483 | [429, 530] | 160 | 51.2% |
-| greedy | 0 | [0, 0] | 160 | 23.8% |
-| mcts-250ms | -401 | [-540, -283] | 160 | 1.3% |
+| **opus-5.5-max** | 1407 | [1341, 1498] | 200 | 100.0% |
+| sonnet-4.6-high | 832 | [753, 943] | 200 | 71.5% |
+| ab-250ms | 740 | [665, 830] | 200 | 64.5% |
+| ab-25ms | 463 | [416, 510] | 200 | 44.0% |
+| greedy | 0 | [0, 0] | 200 | 19.0% |
+| mcts-250ms | -382 | [-505, -289] | 200 | 1.0% |
 
 </details>
 
-Runner: 2 CPUs (AMD EPYC 7763 64-Core Processor), 8 GB.
+Runner: 2 CPUs (INTEL(R) XEON(R) PLATINUM 8573C), 8 GB.
