@@ -200,16 +200,18 @@ struct Weights {
     bool pwSet[14][14];        // height-h stack, when explicitly set
     int iir, hmal, cmb;
     Weights() {
-        ctrl = 1000; mob = 33; pos = 2; wcap = 735; tempo = 500; mobh = 2; bias = -193;
-        mobA = 0; posA = 0; memset(pure, 0, sizeof pure);
+        ctrl = 1000; mob = 17; pos = -41; wcap = 651; tempo = 400; mobh = 15; bias = -269;
+        mobA = -5; posA = 38;
+        memset(pure, 0, sizeof pure);
+        pure[2] = 1681; pure[3] = 703;   // a stack of one colour is worth extra
         dlim = 0; asp = 1200;
-        rbase = 1; rm1 = 8; rm2 = 24; rm3 = 48;
-        nmp = 1; nmpR = 2; nmpD = 2; rfp = 1; rfpM = 1400;
+        rbase = 1; rm1 = 5; rm2 = 14; rm3 = 30;
+        nmp = 1; nmpR = 2; nmpD = 2; rfp = 1; rfpM = 2200;
         phl = 0; rlog = 0; rl0 = 20; rl1 = 55;
-        iir = 0; hmal = 0; cmb = 0;
+        iir = 1; hmal = 60; cmb = 0;
         static const int dl[12] = { 0, 0, 8, 14, 22, 32, 48, 70, 110, 170, 280, 450 };
         memcpy(lmp, dl, sizeof lmp);
-        fut[0] = 0; fut[1] = 700; fut[2] = 1800; fut[3] = 3600; fut[4] = 0;
+        fut[0] = 0; fut[1] = 1100; fut[2] = 2600; fut[3] = 5200; fut[4] = 0;
         memset(pw, 0, sizeof pw);
         memset(pwSet, 0, sizeof pwSet);
         // Piece values by stack height and distance below the top, fitted to the
@@ -217,10 +219,10 @@ struct Weights {
         static const int dpw[6][5] = {
             { 0, 0, 0, 0, 0 },
             { 1000, 0, 0, 0, 0 },
-            { 1193, 922, 0, 0, 0 },
-            { 989, 755, 760, 0, 0 },
-            { 1533, 836, 621, 686, 0 },
-            { 1290, 858, 638, 256, 277 },
+            { 251, 14, 0, 0, 0 },
+            { 927, 745, 648, 0, 0 },
+            { 1242, 765, 704, 663, 0 },
+            { 971, 830, 530, 427, 513 },
         };
         for (int h = 1; h <= 5; h++) for (int ix = 0; ix < h; ix++) { pw[h][ix] = dpw[h][ix]; pwSet[h][ix] = true; }
         // Only used for stack heights the piece table below does not cover (that is,
