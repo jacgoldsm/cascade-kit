@@ -184,7 +184,8 @@ struct Geo {
 // ----------------------------------------------------------------- weights ----
 
 struct Weights {
-    int ctrl, mob, pos, wcap, tempo, mobh;
+    int ctrl, mob, pos, wcap, tempo, mobh, bias, mobA, posA;
+    int pure[14];   // bonus for a stack whose pieces are all one colour
     int ctlh[14];   // control value adjustment by stack height
     int pv[14];     // value per net own piece by stack height
     int lmp[12];    // move-count pruning limit by depth
@@ -195,19 +196,37 @@ struct Weights {
     int nmp, nmpR, nmpD, rfp, rfpM;
     int phl;                   // plies before the end over which positional terms fade
     int rlog, rl0, rl1;        // logarithmic late-move reductions
+    int pw[14][14];            // value of the piece i places below the top of a
+    bool pwSet[14][14];        // height-h stack, when explicitly set
     int iir, hmal, cmb;
     Weights() {
-        ctrl = 1000; mob = 25; pos = 8; wcap = 1150; tempo = 550; mobh = 0;
+        ctrl = 1000; mob = 33; pos = 2; wcap = 735; tempo = 500; mobh = 2; bias = -193;
+        mobA = 0; posA = 0; memset(pure, 0, sizeof pure);
         dlim = 0; asp = 1200;
         rbase = 1; rm1 = 8; rm2 = 24; rm3 = 48;
-        nmp = 1; nmpR = 2; nmpD = 3; rfp = 1; rfpM = 1400;
+        nmp = 1; nmpR = 2; nmpD = 2; rfp = 1; rfpM = 1400;
         phl = 0; rlog = 0; rl0 = 20; rl1 = 55;
         iir = 0; hmal = 0; cmb = 0;
-        static const int dl[12] = { 0, 0, 12, 20, 32, 48, 72, 110, 160, 240, 400, 600 };
+        static const int dl[12] = { 0, 0, 8, 14, 22, 32, 48, 70, 110, 170, 280, 450 };
         memcpy(lmp, dl, sizeof lmp);
         fut[0] = 0; fut[1] = 700; fut[2] = 1800; fut[3] = 3600; fut[4] = 0;
-        static const int dc[14] = { 0, 0, -40, -90, -160, -260, -300, -300, -300, -300, -300, -300, -300, -300 };
-        static const int dp[14] = { 0, 0, 150, 60, -120, -220, -250, -250, -250, -250, -250, -250, -250, -250 };
+        memset(pw, 0, sizeof pw);
+        memset(pwSet, 0, sizeof pwSet);
+        // Piece values by stack height and distance below the top, fitted to the
+        // results of self-play games by logistic regression.
+        static const int dpw[6][5] = {
+            { 0, 0, 0, 0, 0 },
+            { 1000, 0, 0, 0, 0 },
+            { 1193, 922, 0, 0, 0 },
+            { 989, 755, 760, 0, 0 },
+            { 1533, 836, 621, 686, 0 },
+            { 1290, 858, 638, 256, 277 },
+        };
+        for (int h = 1; h <= 5; h++) for (int ix = 0; ix < h; ix++) { pw[h][ix] = dpw[h][ix]; pwSet[h][ix] = true; }
+        // Only used for stack heights the piece table below does not cover (that is,
+        // for collapse heights other than the default 6).
+        static const int dc[14] = { 0, 0, -350, -350, -350, -350, -350, -350, -350, -350, -350, -350, -350, -350 };
+        static const int dp[14] = { 0, 0, 650, 650, 650, 650, 650, 650, 650, 650, 650, 650, 650, 650 };
         memcpy(ctlh, dc, sizeof ctlh);
         memcpy(pv, dp, sizeof pv);
     }
@@ -232,10 +251,21 @@ struct Weights {
         if (k == "iir") { iir = v; return true; }
         if (k == "hmal") { hmal = v; return true; }
         if (k == "cmb") { cmb = v; return true; }
+        if (k.size() > 3 && k[0] == 'p' && isdigit((unsigned char)k[1])) {
+            size_t us = k.find('_');
+            if (us != std::string::npos) {
+                int h = atoi(k.c_str() + 1), ix = atoi(k.c_str() + us + 1);
+                if (h >= 1 && h <= 13 && ix >= 0 && ix < h) { pw[h][ix] = v; pwSet[h][ix] = true; return true; }
+            }
+        }
         if (k.size() > 3 && k.compare(0, 3, "lmp") == 0) { int h = atoi(k.c_str() + 3); if (h >= 2 && h <= 11) { lmp[h] = v; return true; } }
         if (k.size() > 3 && k.compare(0, 3, "fut") == 0) { int h = atoi(k.c_str() + 3); if (h >= 1 && h <= 3) { fut[h] = v; return true; } }
         if (k == "mob") { mob = v; return true; }
         if (k == "mobh") { mobh = v; return true; }
+        if (k == "bias") { bias = v; return true; }
+        if (k == "mobA") { mobA = v; return true; }
+        if (k == "posA") { posA = v; return true; }
+        if (k.size() > 4 && k.compare(0, 4, "pure") == 0) { int h = atoi(k.c_str() + 4); if (h >= 1 && h <= 13) { pure[h] = v; return true; } }
         if (k == "pos") { pos = v; return true; }
         if (k == "wcap") { wcap = v; return true; }
         if (k.size() > 4 && k.compare(0, 4, "ctlh") == 0) { int h = atoi(k.c_str() + 4); if (h >= 1 && h <= 13) { ctlh[h] = v; return true; } }
@@ -249,6 +279,10 @@ struct Weights {
         if (phase >= 256) return r;
         r.mob = mob * phase / 256;
         r.mobh = mobh * phase / 256;
+        r.bias = bias * phase / 256;
+        r.mobA = mobA * phase / 256;
+        r.posA = posA * phase / 256;
+        for (int h = 0; h < 14; h++) r.pure[h] = pure[h] * phase / 256;
         r.pos = pos * phase / 256;
         r.tempo = tempo * phase / 256;
         r.wcap = 1000 + (wcap - 1000) * phase / 256;
@@ -257,6 +291,8 @@ struct Weights {
             r.pv[h] = pv[h] * phase / 256;
         }
         r.ctrl = 1000 + (ctrl - 1000) * phase / 256;
+        for (int h = 1; h <= 13; h++) for (int ix = 0; ix < h; ix++) if (pwSet[h][ix])
+            r.pw[h][ix] = ix == 0 ? 1000 + (pw[h][0] - 1000) * phase / 256 : pw[h][ix] * phase / 256;
         return r;
     }
 
@@ -369,16 +405,32 @@ struct Engine {
         addStride = nCls * C;
         clsBase.assign(N, 0);
         for (int c = 0; c < N; c++) clsBase[c] = clsOf[c] * C;
+        // Value of the piece `ix` places below the top of a height-h stack.  Derived
+        // from (ctrl, ctlh, pv) unless a weight sets it explicitly.
+        int P[14][14];
+        for (int h = 1; h <= 13; h++) for (int ix = 0; ix < h; ix++) {
+            P[h][ix] = ix == 0 ? (we.ctrl + we.ctlh[h] + we.pv[h]) : we.pv[h];
+            if (we.pwSet[h][ix]) P[h][ix] = we.pw[h][ix];
+        }
         valC.assign((size_t)nCls * C, 0);
         for (int k = 0; k < nCls; k++) {
             int dg = uniq[k] / 32, cn = uniq[k] % 32;
             for (int cd = 1; cd < C; cd++) {
                 int h = g.htab[cd];
                 if (h == 0) continue;
-                int blacks = g.ptab[cd] - 1, whites = h - blacks;
-                int sg = (cd & 1) ? -1 : 1;
                 int hh = h < 14 ? h : 13;
-                valC[(size_t)k * C + cd] = sg * (we.ctrl + we.ctlh[hh] + (we.mob + we.mobh * (h - 1)) * dg + we.pos * cn) + we.pv[hh] * (whites - blacks);
+                int sg = (cd & 1) ? -1 : 1;
+                i32 v = sg * ((we.mob + we.mobh * (h - 1)) * dg + we.pos * cn);
+                int net = 0;
+                for (int ix = 0; ix < h; ix++) {
+                    int bit = (cd >> ix) & 1;     // ix places below the top
+                    int si = bit ? -1 : 1;
+                    net += si;
+                    v += si * P[hh][ix < 13 ? ix : 13];
+                }
+                v += net * (we.mobA * dg + we.posA * cn);
+                if (net == h || net == -h) v += sg * we.pure[hh];
+                valC[(size_t)k * C + cd] = v;
             }
         }
         addT.assign((size_t)4 * addStride, 0);
@@ -662,7 +714,7 @@ struct Engine {
     }
 
     inline i32 evalW() const {
-        i32 e = evalAcc - g.komi1000;
+        i32 e = evalAcc - g.komi1000 + we.bias;
         if (e > EVCLAMP) e = EVCLAMP; else if (e < -EVCLAMP) e = -EVCLAMP;
         return e;
     }
@@ -942,6 +994,37 @@ struct Engine {
         return bestMove;
     }
 
+    // ---- evaluation features, for fitting the weights to game results ----
+
+    // Features for maxH == 5: 15 piece-table entries, then mobility, mobility by
+    // height, centrality, captures and tempo.
+    static const int NPW = 15;
+    static const int NF = NPW + 11;
+    static int pwIndex(int h, int ix) { return (h * (h - 1)) / 2 + ix; }
+    void features(double* f) const {
+        for (int i = 0; i < NF; i++) f[i] = 0;
+        for (int c = 0; c < g.N; c++) {
+            u16 cd = code[c];
+            int h = g.htab[cd];
+            if (h == 0 || h > 5) continue;
+            double sg0 = (cd & 1) ? -1.0 : 1.0;
+            int net = 0;
+            for (int ix = 0; ix < h; ix++) {
+                int si = ((cd >> ix) & 1) ? -1 : 1;
+                net += si;
+                f[pwIndex(h, ix)] += si;
+            }
+            f[NPW + 0] += sg0 * g.deg[c];
+            f[NPW + 1] += sg0 * g.deg[c] * (h - 1);
+            f[NPW + 2] += sg0 * g.cen[c];
+            f[NPW + 3] += net * g.deg[c];
+            f[NPW + 4] += net * g.cen[c];
+            if (h >= 2 && (net == h || net == -h)) f[NPW + 5 + (h - 2)] += sg0;
+        }
+        f[NPW + 9] = capW - capB;
+        f[NPW + 10] = side == 0 ? 1.0 : -1.0;
+    }
+
     // ---- notation ----
 
     std::string toCSN() const {
@@ -1215,6 +1298,157 @@ static void runMatch(MatchCfg cfg) {
     fflush(stdout);
 }
 
+// ---- self-play data generation and weight fitting -------------------------
+
+struct GenCfg { int games = 500, threads = 4, seed0 = 1, every = 3, rnd = 4; u64 nodes_ = 400000; Weights w; };
+
+static std::mutex g_out;
+static std::vector<std::string> g_rows;
+
+static void genBatch(GenCfg cfg, int from, int to) {
+    Engine* e = new Engine(); e->w = cfg.w; e->setTTSize(17);
+    e->setRules(5, 6, 150, 0.5); e->allocBufs();
+    std::vector<std::string> rows;
+    for (int gi = from; gi < to; gi++) {
+        e->reset((u32)(cfg.seed0 + gi));
+        e->lastPhase = -1;
+        u32 a = (u32)(gi * 2654435761u + 99u);
+        std::vector<std::string> pend;
+        std::vector<int> plies;
+        double f[Engine::NF];
+        while (!e->terminal()) {
+            int m;
+            if (e->ply < cfg.rnd) {
+                int mv[MAXN * 6];
+                int n = e->genMoves(mv);
+                a = (u32)(a + 0x9e3779b9u);
+                u32 z = a; z = (u32)((z ^ (z >> 16)) * 0x21f0aaadu); z = (u32)((z ^ (z >> 15)) * 0x735a2d97u); z = z ^ (z >> 15);
+                m = mv[z % (u32)n];
+            } else {
+                m = e->think(1e18, cfg.nodes_, 0);
+                if (m < 0 || !e->isLegal(m)) { int mv[MAXN * 6]; int n = e->genMoves(mv); if (!n) break; m = mv[0]; }
+            }
+            if (e->ply >= cfg.rnd && (e->ply % cfg.every) == 0) {
+                e->features(f);
+                char buf[512];
+                int off = 0;
+                for (int i = 0; i < Engine::NF; i++) off += snprintf(buf + off, sizeof buf - off, "%.0f ", f[i]);
+                pend.push_back(std::string(buf));
+                plies.push_back(e->ply);
+            }
+            Undo u; e->make(m, u);
+        }
+        int res = e->exactScoreWhite() > 0 ? 1 : 0;
+        for (size_t k = 0; k < pend.size(); k++) {
+            char tail[64];
+            snprintf(tail, sizeof tail, "%d %d", res, plies[k]);
+            rows.push_back(pend[k] + tail);
+        }
+    }
+    {
+        std::lock_guard<std::mutex> lk(g_out);
+        for (size_t i = 0; i < rows.size(); i++) g_rows.push_back(rows[i]);
+    }
+    delete e;
+}
+
+static void runGen(GenCfg cfg, const std::string& out) {
+    std::vector<std::thread> th;
+    int per = (cfg.games + cfg.threads - 1) / cfg.threads;
+    for (int i = 0; i < cfg.threads; i++) {
+        int from = i * per, to = std::min(cfg.games, from + per);
+        if (from >= to) break;
+        th.push_back(std::thread(genBatch, cfg, from, to));
+    }
+    for (size_t i = 0; i < th.size(); i++) th[i].join();
+    FILE* fp = fopen(out.c_str(), "w");
+    for (size_t i = 0; i < g_rows.size(); i++) fprintf(fp, "%s\n", g_rows[i].c_str());
+    fclose(fp);
+    printf("wrote %zu positions to %s\n", g_rows.size(), out.c_str());
+}
+
+static const char* FNAMES[Engine::NF] = {
+    "p1_0",
+    "p2_0", "p2_1",
+    "p3_0", "p3_1", "p3_2",
+    "p4_0", "p4_1", "p4_2", "p4_3",
+    "p5_0", "p5_1", "p5_2", "p5_3", "p5_4",
+    "mob", "mobh", "pos", "mobA", "posA",
+    "pure2", "pure3", "pure4", "pure5", "wcap", "tempo"
+};
+
+// Fits the evaluation weights to game results by logistic regression (Texel tuning).
+static void runFit(const std::string& file, int plyLo, int plyHi, double l2) {
+    FILE* fp = fopen(file.c_str(), "r");
+    if (!fp) { printf("cannot open %s\n", file.c_str()); return; }
+    const int NF = Engine::NF;
+    std::vector<float> X;
+    std::vector<float> Y;
+    char line[1024];
+    while (fgets(line, sizeof line, fp)) {
+        double v[NF + 2];
+        int k = 0;
+        char* p = line;
+        while (k < NF + 2) {
+            char* end;
+            double x = strtod(p, &end);
+            if (end == p) break;
+            v[k++] = x; p = end;
+        }
+        if (k < NF + 2) continue;
+        int ply = (int)v[NF + 1];
+        if (ply < plyLo || ply > plyHi) continue;
+        for (int i = 0; i < NF; i++) X.push_back((float)v[i]);
+        Y.push_back((float)v[NF]);
+    }
+    fclose(fp);
+    size_t n = Y.size();
+    printf("fitting %zu positions (plies %d..%d)\n", n, plyLo, plyHi);
+    if (n < 100) return;
+    std::vector<double> wv(NF, 0.0), mom(NF + 1, 0.0), vel(NF + 1, 0.0);
+    double b = 0.0;
+    wv[0] = 0.004;   // a sensible starting scale for the control feature
+    double lr = 0.004, beta1 = 0.9, beta2 = 0.999, eps = 1e-8;
+    std::vector<double> gr(NF + 1, 0.0);
+    for (int it = 1; it <= 3000; it++) {
+        for (int i = 0; i <= NF; i++) gr[i] = 0;
+        double loss = 0;
+        for (size_t r = 0; r < n; r++) {
+            const float* x = &X[r * NF];
+            double sc = b;
+            for (int i = 0; i < NF; i++) sc += wv[i] * x[i];
+            double pr = 1.0 / (1.0 + exp(-sc));
+            double d = pr - Y[r];
+            for (int i = 0; i < NF; i++) gr[i] += d * x[i];
+            gr[NF] += d;
+            loss += -(Y[r] * log(pr + 1e-12) + (1 - Y[r]) * log(1 - pr + 1e-12));
+        }
+        for (int i = 0; i <= NF; i++) gr[i] /= (double)n;
+        for (int i = 0; i < NF; i++) gr[i] += l2 * wv[i];
+        for (int i = 0; i <= NF; i++) {
+            mom[i] = beta1 * mom[i] + (1 - beta1) * gr[i];
+            vel[i] = beta2 * vel[i] + (1 - beta2) * gr[i] * gr[i];
+            double mh = mom[i] / (1 - pow(beta1, it)), vh = vel[i] / (1 - pow(beta2, it));
+            double step = lr * mh / (sqrt(vh) + eps);
+            if (i < NF) wv[i] -= step; else b -= step;
+        }
+        if (it % 500 == 0) printf("  iter %4d loss %.5f\n", it, loss / n);
+    }
+    if (wv[0] <= 0) { printf("degenerate fit (ctrl <= 0)\n"); return; }
+    double sc = 1000.0 / wv[0];
+    printf("fitted (scaled so ctrl=1000), sigmoid scale %.1f eval units:\n", 1.0 / wv[0] * 1000.0);
+    std::string outw;
+    for (int i = 0; i < NF; i++) {
+        long vi = lround(wv[i] * sc);
+        printf("  %-7s %6ld\n", FNAMES[i], vi);
+        if (i) { if (!outw.empty()) outw += ","; outw += std::string(FNAMES[i]) + "=" + std::to_string(vi); }
+    }
+    long bi = lround(b * sc);
+    printf("  %-7s %6ld\n", "bias", bi);
+    outw += ",bias=" + std::to_string(bi);
+    printf("--w \"%s\"\n", outw.c_str());
+}
+
 int main(int argc, char** argv) {
     Weights w0;
     double timeFrac = 0.94, timeReserve = 10.0;
@@ -1277,6 +1511,38 @@ int main(int argc, char** argv) {
                 Undo u; e->make(m, u);
             }
             printf("avg depth %.2f, avg ms %.1f, knps %.0f\n", (double)dsum / cnt, tot / cnt, tn / tot);
+            return 0;
+        }
+        else if (args[i] == "--gendata") {
+            GenCfg cfg; cfg.w = w0;
+            std::string out = "data.txt";
+            for (size_t j = i + 1; j < args.size(); j++) {
+                size_t eq = args[j].find('=');
+                if (eq == std::string::npos) continue;
+                std::string k = args[j].substr(0, eq), v = args[j].substr(eq + 1);
+                if (k == "games") cfg.games = atoi(v.c_str());
+                else if (k == "threads") cfg.threads = atoi(v.c_str());
+                else if (k == "nodes") cfg.nodes_ = (u64)atoll(v.c_str());
+                else if (k == "seed") cfg.seed0 = atoi(v.c_str());
+                else if (k == "every") cfg.every = atoi(v.c_str());
+                else if (k == "rnd") cfg.rnd = atoi(v.c_str());
+                else if (k == "out") out = v;
+            }
+            runGen(cfg, out);
+            return 0;
+        }
+        else if (args[i] == "--fit") {
+            std::string file = i + 1 < args.size() ? args[i + 1] : "data.txt";
+            int lo = 0, hi = 1000; double l2 = 0.0;
+            for (size_t j = i + 2; j < args.size(); j++) {
+                size_t eq = args[j].find('=');
+                if (eq == std::string::npos) continue;
+                std::string k = args[j].substr(0, eq), v = args[j].substr(eq + 1);
+                if (k == "lo") lo = atoi(v.c_str());
+                else if (k == "hi") hi = atoi(v.c_str());
+                else if (k == "l2") l2 = atof(v.c_str());
+            }
+            runFit(file, lo, hi, l2);
             return 0;
         }
         else if (args[i] == "--csn") {
