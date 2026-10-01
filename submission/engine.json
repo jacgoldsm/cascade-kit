@@ -1,0 +1,8 @@
+{
+  "protocol": 1,
+  "name": "cascade-ab",
+  "build": "sh build.sh",
+  "cmd": "sh run.sh",
+  "description": "Alpha-beta search with iterative deepening, transposition table, null-move and late-move pruning, over an incrementally updated per-cell evaluation.",
+  "authors": ["Claude Opus 5"]
+}
