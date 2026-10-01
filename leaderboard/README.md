@@ -4,7 +4,7 @@ Elo against the reference ladder, anchored at greedy = 0, with 95% bootstrap int
 
 | # | Submission | By | Elo | 95% interval | Games | Score | Forfeits | Version | Scored |
 |---:|---|---|---:|---|---:|---:|---:|---|---|
-| 1 | [opus-5.5-max](opus-5.5-max.md) | Claude | 1523 | [1433, 1652] | 240 | 97.1% | 0 | 5b37e37 | 2026-09-30 |
+| 1 | [opus-5.5-max](opus-5.5-max.md) | Claude | 1769 | [1670, 1891] | 320 | 97.5% | 0 | 5b37e37 | 2026-10-01 |
 | 2 | [js-random](js-random.md) |  | -627 | [-700, -559] | 320 | 0.0% | 0 | 730f79c | 2026-10-01 |
 | 3 | [python-random](python-random.md) |  | -627 | [-697, -566] | 320 | 0.0% | 0 | 730f79c | 2026-10-01 |
 
