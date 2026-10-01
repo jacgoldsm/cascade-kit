@@ -10,13 +10,15 @@ Elo against the reference ladder, anchored at greedy = 0, with 95% bootstrap int
 
 ## Reference ladder
 
-From 600 calibration games between the ladder engines.
+From 1120 calibration games between the ladder engines.
 
 | Engine | Elo | 95% interval |
 |---|---:|---|
-| sonnet-5.5-high | 1435 | [1359, 1526] |
-| sonnet-4.6-high | 879 | [784, 1003] |
-| ab-250ms | 740 | [668, 833] |
-| ab-25ms | 446 | [393, 490] |
+| sonnet-5.5-high | 1643 | [1545, 1773] |
+| sonnet-5.5-100ms | 1460 | [1379, 1574] |
+| sonnet-5.5-25ms | 1063 | [986, 1166] |
+| sonnet-4.6-high | 785 | [705, 885] |
+| ab-250ms | 652 | [589, 719] |
+| ab-25ms | 440 | [393, 487] |
 | greedy | 0 | [0, 0] |
-| mcts-250ms | -493 | [-542, -431] |
+| mcts-250ms | -197 | [-294, -92] |
