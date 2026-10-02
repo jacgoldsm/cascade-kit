@@ -12,7 +12,7 @@ enum P {
   P_OWNB, P_ENB,                       // own / enemy pieces buried in a controlled stack
   P_RING0, P_RING1, P_RING2, P_RING3, P_RING4,
   P_MOB,                               // per own move direction
-  P_LMR, P_NULL, P_QS, P_FUT, P_NNSCALE, P_LMP, P_ASP, P_LMRDIV, P_LMPD, P_FFUT, P_QSG,
+  P_LMR, P_NULL, P_QS, P_FUT, P_NNSCALE, P_LMP, P_ASP, P_LMRDIV, P_LMPD, P_FFUT, P_QSG, P_HMAL, P_IIR, P_RAZOR,
   P_COUNT
 };
 
@@ -25,7 +25,7 @@ struct Params {
       0, 0,
       0, 0, 0, 0, 0,
       0,
-      1, 0, 1, 60, 170, 4, 150, 200, 3, 0, 0,
+      1, 0, 1, 60, 170, 4, 150, 200, 3, 0, 0, 8, 4, 0,
     };
     memcpy(v, d, sizeof v);
   }
@@ -34,7 +34,7 @@ struct Params {
 
 static const char* PNAMES[P_COUNT] = {
   "tempo", "h1", "h2", "h3", "h4", "h5", "ownb", "enb",
-  "ring0", "ring1", "ring2", "ring3", "ring4", "mob", "lmr", "null", "qs", "fut", "nnscale", "lmp", "asp", "lmrdiv", "lmpd", "ffut", "qsg",
+  "ring0", "ring1", "ring2", "ring3", "ring4", "mob", "lmr", "null", "qs", "fut", "nnscale", "lmp", "asp", "lmrdiv", "lmpd", "ffut", "qsg", "hmal", "iir", "razor",
 };
 
 constexpr int INF = 32000;
@@ -254,11 +254,18 @@ struct Searcher {
     }
 
     int staticEval = -INF;
-    if (!pvNode && (pr.v[P_NULL] || pr.v[P_FUT] || pr.v[P_FFUT])) staticEval = eval(p, ply);
+    if (!pvNode && (pr.v[P_NULL] || pr.v[P_FUT] || pr.v[P_FFUT] || pr.v[P_RAZOR])) staticEval = eval(p, ply);
 
     // Reverse futility pruning: far above beta near the leaves.
     if (pr.v[P_FUT] && !pvNode && depth <= 3 && staticEval - pr.v[P_FUT] * depth >= beta && staticEval < WIN / 2)
       return staticEval;
+
+    // Razoring: hopeless shallow nodes drop into quiescence.
+    if (pr.v[P_RAZOR] && !pvNode && depth <= 2 && staticEval + pr.v[P_RAZOR] * depth <= alpha && alpha > -WIN / 2) {
+      int v = qsearch(p, alpha, alpha + 1, ply);
+      if (stop) return 0;
+      if (v <= alpha) return v;
+    }
 
     // Null move pruning.
     if (pr.v[P_NULL] && allowNull && !pvNode && depth >= 3 && staticEval >= beta && p.ply + 1 < MAXPLY) {
@@ -282,6 +289,8 @@ struct Searcher {
     const Tables& t = T();
 
     // Searches move m as the i-th move. Returns 1 on a beta cutoff, 2 if time ran out.
+    Move tried[64];
+    int ntried = 0;
     auto tryMove = [&](Move m, int i, int g) -> int {
       if (i == 0) gain0 = g;
       if (pr.v[P_LMP] && !pvNode && depth <= pr.v[P_LMPD] && i >= pr.v[P_LMP] * depth && best > -WIN / 2 &&
@@ -325,16 +334,21 @@ struct Searcher {
           if (v >= beta) {
             if (killers[ply][0] != m) { killers[ply][1] = killers[ply][0]; killers[ply][0] = m; }
             hist[p.stm][m] += depth * depth;
+            if (pr.v[P_HMAL])
+              for (int k = 0; k < ntried; k++)
+                hist[p.stm][tried[k]] = std::max(-30000, hist[p.stm][tried[k]] - depth * depth * pr.v[P_HMAL] / 4);
             if (hist[p.stm][m] > 30000) for (int k = 0; k < N * 6; k++) { hist[0][k] /= 2; hist[1][k] /= 2; }
             return 1;
           }
         }
       }
+      if (ntried < 64) tried[ntried++] = m;
       return 0;
     };
 
     int idx = 0;
     int r = 0;
+    if (pr.v[P_IIR] && depth >= pr.v[P_IIR] && ttMove < 0) depth--;
     bool ttLegal = ttMove >= 0 && ttMove < N * 6 && t.TOP[p.c[ttMove / 6]] == p.stm && t.nb[ttMove / 6][ttMove % 6] >= 0;
     if (ttLegal) {
       r = tryMove(ttMove, idx++, gain(p, ttMove));
