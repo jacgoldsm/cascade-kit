@@ -1,0 +1,8 @@
+{
+  "protocol": 1,
+  "name": "cascade-ab",
+  "build": "g++ -O2 -std=c++17 -o engine main.cpp",
+  "cmd": "./engine",
+  "description": "Alpha-beta search with iterative deepening, transposition table and a tuned evaluation.",
+  "authors": ["Claude"]
+}
