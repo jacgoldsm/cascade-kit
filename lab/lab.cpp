@@ -7,7 +7,7 @@
 #include <map>
 using namespace cz;
 
-struct Cfg { Params p; double ms = 0; long long nodes = 0; int depth = 64; std::string netPath; Net* net = nullptr; };
+struct Cfg { Params p; double softf = 0.5; double ms = 0; long long nodes = 0; int depth = 64; std::string netPath; Net* net = nullptr; };
 
 static bool setParam(Params& p, const std::string& kv) {
   auto eq = kv.find('=');
@@ -26,6 +26,7 @@ static void parseCfg(Cfg& c, const std::string& s) {
       else if (kv.rfind("nodes=", 0) == 0) c.nodes = atoll(kv.c_str() + 6);
       else if (kv.rfind("depth=", 0) == 0) c.depth = atoi(kv.c_str() + 6);
       else if (kv.rfind("net=", 0) == 0) c.netPath = kv.substr(4);
+      else if (kv.rfind("softf=", 0) == 0) c.softf = atof(kv.c_str() + 6);
       else setParam(c.p, kv);
     }
     i = j + 1;
@@ -40,7 +41,7 @@ static int playGame(uint32_t seed, Searcher* w, const Cfg& cw, Searcher* b, cons
     Searcher* s = p.stm ? b : w;
     const Cfg& c = p.stm ? cb : cw;
     double hard = c.ms > 0 ? c.ms * 0.9 : 1e18;
-    double soft = c.ms > 0 ? c.ms * 0.5 : 1e18;
+    double soft = c.ms > 0 ? c.ms * c.softf : 1e18;
     Move m = s->think(p, soft, hard, c.depth, c.nodes);
     p.make(m);
   }

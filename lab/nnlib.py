@@ -67,3 +67,49 @@ class Net(nn.Module):
         a = torch.clamp(a, 0, 1)
         b = torch.clamp(self.l2(a), 0, 1)
         return self.l3(b).squeeze(1) + self.skip(scal).squeeze(1)
+
+# ---- v2 inputs: per-cell code plus "can be covered next move" bits for each side ----
+DQ = [1, 1, 0, -1, -1, 0]; DR = [0, -1, -1, 0, 1, 1]
+NB = np.full((N, 6), -1, np.int64)
+for i, (q, r) in enumerate(cells):
+    for d in range(6):
+        k = (q + DQ[d], r + DR[d])
+        if k in index: NB[i, d] = index[k]
+WALK = np.full((N, 6, 8), N, np.int64)  # N = dummy (illegal)
+for c in range(N):
+    for d0 in range(6):
+        if NB[c, d0] < 0: continue
+        pos, d = c, d0
+        for k in range(5):
+            if NB[pos, d] < 0: d = (d + 3) % 6
+            pos = NB[pos, d]
+            WALK[c, d0, k + 1] = pos  # index by height h -> landing cell
+
+def attack_bits(codes, chunk=200000):
+    """codes: (n,61) stm-relative. returns (n,61) values in 0..3: bit0 me can land top here, bit1 opp can."""
+    if codes.shape[0] > chunk:
+        return np.concatenate([attack_bits(codes[i:i + chunk], chunk) for i in range(0, codes.shape[0], chunk)])
+    codes = codes.astype(np.int64)
+    n = codes.shape[0]
+    h = H[codes]; top = TOPC[codes]
+    att = np.zeros((n, 2, N + 1), np.uint8)
+    rows = np.arange(n)[:, None]
+    cellidx = np.arange(N)[None, :]
+    for d in range(6):
+        dest = WALK[cellidx, d, h]  # (n,61); h=0 -> WALK[...,0] = N dummy
+        for side in range(2):
+            dd = np.where(top == side, dest, N)
+            att[rows, side, dd] = 1
+    return (att[:, 0, :N] + 2 * att[:, 1, :N]).astype(np.uint8)
+
+class Net2(Net):
+    def __init__(self, H1=64, H2=32):
+        super().__init__(H1, H2)
+        self.emb = nn.EmbeddingBag(N * 256, H1, mode='sum')
+        nn.init.normal_(self.emb.weight, 0, 0.01)
+    def forward(self, codes, scal, att):
+        idx = codes.long() + att.long() * 64 + torch.arange(N, device=codes.device)[None, :] * 256
+        a = self.emb(idx) + self.sc(scal)
+        a = torch.clamp(a, 0, 1)
+        b = torch.clamp(self.l2(a), 0, 1)
+        return self.l3(b).squeeze(1) + self.skip(scal).squeeze(1)

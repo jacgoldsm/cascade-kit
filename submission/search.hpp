@@ -1,6 +1,7 @@
 // Evaluation and alpha-beta search.
 #pragma once
 #include "nn.hpp"
+#include <cmath>
 
 namespace cz {
 
@@ -11,7 +12,7 @@ enum P {
   P_OWNB, P_ENB,                       // own / enemy pieces buried in a controlled stack
   P_RING0, P_RING1, P_RING2, P_RING3, P_RING4,
   P_MOB,                               // per own move direction
-  P_LMR, P_NULL, P_QS, P_FUT, P_NNSCALE,
+  P_LMR, P_NULL, P_QS, P_FUT, P_NNSCALE, P_LMP, P_ASP, P_LMRDIV, P_LMPD, P_FFUT,
   P_COUNT
 };
 
@@ -24,7 +25,7 @@ struct Params {
       0, 0,
       0, 0, 0, 0, 0,
       0,
-      1, 0, 1, 0, 400,
+      1, 0, 1, 60, 170, 4, 150, 200, 3, 0,
     };
     memcpy(v, d, sizeof v);
   }
@@ -33,7 +34,7 @@ struct Params {
 
 static const char* PNAMES[P_COUNT] = {
   "tempo", "h1", "h2", "h3", "h4", "h5", "ownb", "enb",
-  "ring0", "ring1", "ring2", "ring3", "ring4", "mob", "lmr", "null", "qs", "fut", "nnscale",
+  "ring0", "ring1", "ring2", "ring3", "ring4", "mob", "lmr", "null", "qs", "fut", "nnscale", "lmp", "asp", "lmrdiv", "lmpd", "ffut",
 };
 
 constexpr int INF = 32000;
@@ -86,6 +87,13 @@ struct Searcher {
   uint8_t age = 0;
 
   int killers[160][2];
+  int lmrTable[64][64];
+
+  void initLmr() {
+    for (int d = 0; d < 64; d++)
+      for (int i = 0; i < 64; i++)
+        lmrTable[d][i] = (d && i) ? (int)(0.5 + std::log((double)d) * std::log((double)i) * 100.0 / pr.v[P_LMRDIV]) : 0;
+  }
   int hist[2][N * 6];
 
   long long nodes = 0;
@@ -220,7 +228,11 @@ struct Searcher {
     }
 
     int staticEval = -INF;
-    if (!pvNode && (pr.v[P_NULL] || pr.v[P_FUT])) staticEval = eval(p);
+    if (!pvNode && (pr.v[P_NULL] || pr.v[P_FUT] || pr.v[P_FFUT])) staticEval = eval(p);
+
+    // Reverse futility pruning: far above beta near the leaves.
+    if (pr.v[P_FUT] && !pvNode && depth <= 3 && staticEval - pr.v[P_FUT] * depth >= beta && staticEval < WIN / 2)
+      return staticEval;
 
     // Null move pruning.
     if (pr.v[P_NULL] && allowNull && !pvNode && depth >= 3 && staticEval >= beta && p.ply + 1 < MAXPLY) {
@@ -266,6 +278,12 @@ struct Searcher {
         std::swap(ms[i], ms[bi]); std::swap(scores[i], scores[bi]); std::swap(gains[i], gains[bi]);
       }
       Move m = ms[i];
+      if (pr.v[P_LMP] && !pvNode && depth <= pr.v[P_LMPD] && i >= pr.v[P_LMP] * depth && best > -WIN / 2 &&
+          gains[i] <= 0 && m != killers[ply][0] && m != killers[ply][1])
+        continue;
+      if (pr.v[P_FFUT] && !pvNode && depth == 1 && i > 0 && gains[i] <= 0 && best > -WIN / 2 &&
+          staticEval + pr.v[P_FFUT] <= alpha)
+        continue;
       Pos q = p;
       q.make(m);
       int v;
@@ -274,10 +292,16 @@ struct Searcher {
       } else {
         int red = 0;
         if (pr.v[P_LMR] && depth >= 3 && i >= 3 && m != killers[ply][0] && m != killers[ply][1]) {
-          red = 1;
-          if (i >= 10 && depth >= 4) red = 2;
-          if (gains[i] < gains[0] - 2 && depth >= 5) red++;
+          if (pr.v[P_LMR] >= 2) {
+            red = lmrTable[std::min(depth, 63)][std::min(i, 63)];
+            if (pvNode && red > 0) red--;
+          } else {
+            red = 1;
+            if (i >= 10 && depth >= 4) red = 2;
+            if (gains[i] < gains[0] - 2 && depth >= 5) red++;
+          }
           if (red > depth - 2) red = depth - 2;
+          if (red < 0) red = 0;
         }
         v = -search(q, depth - 1 - red, -alpha - 1, -alpha, ply + 1, false, true);
         if (!stop && v > alpha && red)
@@ -323,6 +347,7 @@ struct Searcher {
     stop = false;
     age++;
     memset(killers, -1, sizeof killers);
+    initLmr();
     for (int k = 0; k < N * 6; k++) { hist[0][k] /= 8; hist[1][k] /= 8; }
     Move ms[400];
     int n = root.genMoves(ms);
@@ -334,7 +359,7 @@ struct Searcher {
       rootBest = -1;
       int v;
       if (d >= 4) {
-        int win = 60;
+        int win = pr.v[P_ASP];
         int a = prevScore - win, b = prevScore + win;
         for (;;) {
           v = search(root, d, a, b, 0, true, false);

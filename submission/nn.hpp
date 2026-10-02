@@ -19,7 +19,6 @@ struct AlignedAlloc {
 typedef std::vector<float, AlignedAlloc<float>> fvec;
 
 constexpr int NSCAL = 4;
-constexpr int NH1 = 64;
 constexpr int NH2 = 32;
 
 struct Net {
@@ -29,6 +28,7 @@ struct Net {
   fvec SCT;  // [NSCAL][H1]
   fvec B1;   // [H1]
   bool avx2 = false;
+  bool v2 = false;
   fvec W2;   // [H2][H1]
   fvec W2T;  // [H1][H2]
   fvec B2;   // [H2]
@@ -45,21 +45,23 @@ struct Net {
     int32_t hdr[2];
     if (fread(hdr, 4, 2, f) != 2) { fclose(f); return false; }
     H1 = hdr[0]; H2 = hdr[1];
-    if (H1 != NH1 || H2 != NH2) { fclose(f); return false; }
-    E.resize((size_t)N * 64 * H1); SC.resize(H1 * NSCAL); B1.resize(H1);
+    v2 = H2 >= 1000;
+    if (v2) H2 -= 1000;
+    if ((H1 != 32 && H1 != 64 && H1 != 128 && H1 != 256) || H2 != NH2) { fclose(f); return false; }
+    E.resize((size_t)N * (v2 ? 256 : 64) * H1); SC.resize(H1 * NSCAL); B1.resize(H1);
     W2.resize(H2 * H1); B2.resize(H2); W3.resize(H2);
     bool good = fread(E.data(), 4, E.size(), f) == E.size() && fread(SC.data(), 4, SC.size(), f) == SC.size() &&
                 fread(B1.data(), 4, B1.size(), f) == B1.size() && fread(W2.data(), 4, W2.size(), f) == W2.size() &&
                 fread(B2.data(), 4, B2.size(), f) == B2.size() && fread(W3.data(), 4, W3.size(), f) == W3.size() &&
                 fread(&B3, 4, 1, f) == 1 && fread(SK, 4, NSCAL, f) == NSCAL && fread(&SKB, 4, 1, f) == 1;
     fclose(f);
-    SCT.resize(NH1 * NSCAL);
-    for (int j = 0; j < NH1; j++)
-      for (int k = 0; k < NSCAL; k++) SCT[k * NH1 + j] = SC[j * NSCAL + k];
+    SCT.resize(H1 * NSCAL);
+    for (int j = 0; j < H1; j++)
+      for (int k = 0; k < NSCAL; k++) SCT[k * H1 + j] = SC[j * NSCAL + k];
     avx2 = __builtin_cpu_supports("avx2") && __builtin_cpu_supports("fma");
-    W2T.resize(NH1 * NH2);
+    W2T.resize(H1 * NH2);
     for (int m = 0; m < NH2; m++)
-      for (int j = 0; j < NH1; j++) W2T[j * NH2 + m] = W2[m * NH1 + j];
+      for (int j = 0; j < H1; j++) W2T[j * NH2 + m] = W2[m * H1 + j];
     const Tables& t = T();
     for (int c = 0; c < 256; c++) {
       int h = t.H[c];
@@ -71,7 +73,7 @@ struct Net {
 
   typedef float v8 __attribute__((vector_size(32)));
 
-  template <int DUMMY>
+  template <int NH1>
   __attribute__((always_inline)) static inline float evalImpl(const Net& n, const Pos& p) {
     int me = p.stm;
     float capd = (float)(p.cap[me] - p.cap[me ^ 1]);
@@ -86,10 +88,28 @@ struct Net {
              scw[3 * NH1 / 8 + k] * sc[3];
     const v8* E0 = (const v8*)n.E.data();
     const uint8_t* fl = n.FLIP;
-    for (int i = 0; i < N; i++) {
-      int code = me ? fl[p.c[i]] : p.c[i];
-      const v8* e = E0 + ((size_t)i * 64 + code) * (NH1 / 8);
-      for (int k = 0; k < NH1 / 8; k++) a[k] += e[k];
+    if (n.v2) {
+      const Tables& t = T();
+      uint8_t att[N + 1] = {};
+      for (int i = 0; i < N; i++) {
+        uint8_t c = p.c[i];
+        if (c == EMPTY) continue;
+        int h = t.H[c];
+        uint8_t bit = t.TOP[c] == me ? 1 : 2;
+        for (int d = 0; d < 6; d++)
+          if (t.nb[i][d] >= 0) att[t.walk[i][d][h - 1]] |= bit;
+      }
+      for (int i = 0; i < N; i++) {
+        int code = (me ? fl[p.c[i]] : p.c[i]) + 64 * att[i];
+        const v8* e = E0 + ((size_t)i * 256 + code) * (NH1 / 8);
+        for (int k = 0; k < NH1 / 8; k++) a[k] += e[k];
+      }
+    } else {
+      for (int i = 0; i < N; i++) {
+        int code = me ? fl[p.c[i]] : p.c[i];
+        const v8* e = E0 + ((size_t)i * 64 + code) * (NH1 / 8);
+        for (int k = 0; k < NH1 / 8; k++) a[k] += e[k];
+      }
     }
     alignas(32) float acc[NH1];
     const v8 zero = {0, 0, 0, 0, 0, 0, 0, 0};
@@ -124,11 +144,23 @@ struct Net {
     return out;
   }
 
-  __attribute__((target("avx2,fma"))) static float evalAvx2(const Net& n, const Pos& p) { return evalImpl<1>(n, p); }
-  static float evalGeneric(const Net& n, const Pos& p) { return evalImpl<0>(n, p); }
+  template <int NH1>
+  __attribute__((target("avx2,fma"))) static float evalAvx2(const Net& n, const Pos& p) { return evalImpl<NH1>(n, p); }
+  template <int NH1>
+  static float evalGeneric(const Net& n, const Pos& p) { return evalImpl<NH1>(n, p); }
+
+  template <int NH1>
+  float evalH(const Pos& p) const { return avx2 ? evalAvx2<NH1>(*this, p) : evalGeneric<NH1>(*this, p); }
 
   // Returns the logit of the side to move winning.
-  float eval(const Pos& p) const { return avx2 ? evalAvx2(*this, p) : evalGeneric(*this, p); }
+  float eval(const Pos& p) const {
+    switch (H1) {
+      case 32: return evalH<32>(p);
+      case 64: return evalH<64>(p);
+      case 128: return evalH<128>(p);
+      default: return evalH<256>(p);
+    }
+  }
 };
 
 }  // namespace cz

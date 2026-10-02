@@ -45,12 +45,17 @@ int main() {
       }
       double hard = 1e18, soft = 1e18;
       if (movetime > 0) {
-        hard = std::max(1.0, std::min(movetime * 0.9, movetime - 20));
-        soft = movetime * 0.5;
+        hard = std::max(1.0, std::min(movetime * 0.94, movetime - 15));
+        soft = hard;
       }
       Move m = s->think(pos, soft, hard, depth, nodes);
       std::cout << "info depth " << s->depthDone << " score " << s->rootScore << " nodes " << s->nodes
                 << " time " << (int)s->elapsedMs() << "\n";
+      if (m < 0) {
+        Move ms[400];
+        int n = pos.genMoves(ms);
+        m = n ? ms[0] : 0;
+      }
       std::cout << "bestmove " << pos.moveStr(m) << std::endl;
     } else if (cmd == "quit") {
       break;
