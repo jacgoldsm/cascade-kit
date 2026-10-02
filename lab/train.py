@@ -4,7 +4,7 @@ ap = argparse.ArgumentParser()
 ap.add_argument('files', nargs='+'); ap.add_argument('--h1', type=int, default=64); ap.add_argument('--h2', type=int, default=32)
 ap.add_argument('--epochs', type=int, default=10); ap.add_argument('--bs', type=int, default=1024); ap.add_argument('--lr', type=float, default=2e-3)
 ap.add_argument('--out', default='net.pt'); ap.add_argument('--lam', type=float, default=1.0, help='weight on result vs search score')
-ap.add_argument('--wd', type=float, default=0.0); ap.add_argument('--v2', action='store_true'); ap.add_argument('--init', default=None)
+ap.add_argument('--wd', type=float, default=0.0); ap.add_argument('--sscale', type=float, default=170.0); ap.add_argument('--v2', action='store_true'); ap.add_argument('--init', default=None)
 a = ap.parse_args()
 torch.manual_seed(0)
 parts = [np.fromfile(f, dtype=nnlib.REC) for f in a.files]
@@ -14,7 +14,7 @@ codes, scal, win, fm, score = nnlib.prepare(recs)
 n = len(codes); nv = sum(len(v) for v in vap)
 C = torch.from_numpy(codes.astype(np.int64)); S = torch.from_numpy(scal); W = torch.from_numpy(win)
 A = torch.from_numpy(nnlib.attack_bits(codes).astype(np.int64)) if a.v2 else torch.zeros_like(C)
-SC = torch.sigmoid(torch.from_numpy(score) / 400.0)
+SC = torch.sigmoid(torch.from_numpy(score) / a.sscale)
 TGT = a.lam * W + (1 - a.lam) * SC
 P = torch.from_numpy(nnlib.PERMS)
 inv = torch.argsort(P, 1)  # new[j] = old[inv[j]]

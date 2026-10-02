@@ -152,6 +152,120 @@ struct Net {
   template <int NH1>
   float evalH(const Pos& p) const { return avx2 ? evalAvx2<NH1>(*this, p) : evalGeneric<NH1>(*this, p); }
 
+  // ---- incremental accumulators ----
+  // acc[0] holds the embedding sum with white-relative codes, acc[1] with black-relative
+  // codes; each is NH1 floats (64-byte aligned, up to 256).
+  template <int NH1>
+  __attribute__((always_inline)) static inline void accFullImpl(const Net& n, const Pos& p, float* acc) {
+    v8 a0[NH1 / 8], a1[NH1 / 8];
+    for (int k = 0; k < NH1 / 8; k++) { a0[k] = v8{}; a1[k] = v8{}; }
+    const v8* E0 = (const v8*)n.E.data();
+    for (int i = 0; i < N; i++) {
+      const v8* e0 = E0 + ((size_t)i * 64 + p.c[i]) * (NH1 / 8);
+      const v8* e1 = E0 + ((size_t)i * 64 + n.FLIP[p.c[i]]) * (NH1 / 8);
+      for (int k = 0; k < NH1 / 8; k++) { a0[k] += e0[k]; a1[k] += e1[k]; }
+    }
+    v8* o = (v8*)acc;
+    for (int k = 0; k < NH1 / 8; k++) { o[k] = a0[k]; o[NH1 / 8 + k] = a1[k]; }
+  }
+  template <int NH1>
+  __attribute__((always_inline)) static inline void accUpdateImpl(const Net& n, const float* in, float* out,
+                                                                 const Pos& child, const Delta& d) {
+    v8 a0[NH1 / 8], a1[NH1 / 8];
+    const v8* iv = (const v8*)in;
+    for (int k = 0; k < NH1 / 8; k++) { a0[k] = iv[k]; a1[k] = iv[NH1 / 8 + k]; }
+    const v8* E0 = (const v8*)n.E.data();
+    for (int j = 0; j < d.n; j++) {
+      int i = d.cell[j];
+      uint8_t b = d.before[j], f = child.c[i];
+      if (b == f) continue;
+      const v8* eb0 = E0 + ((size_t)i * 64 + b) * (NH1 / 8);
+      const v8* ef0 = E0 + ((size_t)i * 64 + f) * (NH1 / 8);
+      const v8* eb1 = E0 + ((size_t)i * 64 + n.FLIP[b]) * (NH1 / 8);
+      const v8* ef1 = E0 + ((size_t)i * 64 + n.FLIP[f]) * (NH1 / 8);
+      for (int k = 0; k < NH1 / 8; k++) { a0[k] += ef0[k] - eb0[k]; a1[k] += ef1[k] - eb1[k]; }
+    }
+    v8* o = (v8*)out;
+    for (int k = 0; k < NH1 / 8; k++) { o[k] = a0[k]; o[NH1 / 8 + k] = a1[k]; }
+  }
+  // Evaluates from a precomputed accumulator pair.
+  template <int NH1>
+  __attribute__((always_inline)) static inline float evalAccImpl(const Net& n, const Pos& p, const float* acc2) {
+    int me = p.stm;
+    float capd = (float)(p.cap[me] - p.cap[me ^ 1]);
+    float margin = (float)(p.nstk[me] + p.cap[me] - p.nstk[me ^ 1] - p.cap[me ^ 1]) + (me ? 0.5f : -0.5f);
+    float ply = p.ply / 150.0f;
+    float sc[NSCAL] = {margin / 10, capd / 10, ply, ply * margin / 10};
+    const v8* b1 = (const v8*)n.B1.data();
+    const v8* scw = (const v8*)n.SCT.data();
+    const v8* av = (const v8*)acc2 + me * (NH1 / 8);
+    const v8 zero = {0, 0, 0, 0, 0, 0, 0, 0};
+    const v8 one = {1, 1, 1, 1, 1, 1, 1, 1};
+    alignas(32) float acc[NH1];
+    for (int k = 0; k < NH1 / 8; k++) {
+      v8 x = av[k] + b1[k] + scw[k] * sc[0] + scw[NH1 / 8 + k] * sc[1] + scw[2 * NH1 / 8 + k] * sc[2] +
+             scw[3 * NH1 / 8 + k] * sc[3];
+      x = x < zero ? zero : x;
+      x = x > one ? one : x;
+      *(v8*)&acc[k * 8] = x;
+    }
+    return n.head<NH1>(acc, sc);
+  }
+  template <int NH1>
+  __attribute__((always_inline)) inline float head(const float* acc, const float* sc) const {
+    const v8 zero = {0, 0, 0, 0, 0, 0, 0, 0};
+    const v8 one = {1, 1, 1, 1, 1, 1, 1, 1};
+    v8 h[NH2 / 8];
+    const v8* b2 = (const v8*)B2.data();
+    for (int m = 0; m < NH2 / 8; m++) h[m] = b2[m];
+    const v8* w2 = (const v8*)W2T.data();
+    for (int j = 0; j < NH1; j++) {
+      float x = acc[j];
+      if (x == 0.0f) continue;
+      const v8* w = w2 + j * (NH2 / 8);
+      for (int m = 0; m < NH2 / 8; m++) h[m] += w[m] * x;
+    }
+    const v8* w3 = (const v8*)W3.data();
+    v8 o = zero;
+    for (int m = 0; m < NH2 / 8; m++) {
+      v8 x = h[m];
+      x = x < zero ? zero : x;
+      x = x > one ? one : x;
+      o += x * w3[m];
+    }
+    float out = B3 + SKB;
+    for (int k = 0; k < NSCAL; k++) out += SK[k] * sc[k];
+    for (int k = 0; k < 8; k++) out += o[k];
+    return out;
+  }
+
+  template <int NH1>
+  __attribute__((target("avx2,fma"))) static void accFullAvx2(const Net& n, const Pos& p, float* acc) { accFullImpl<NH1>(n, p, acc); }
+  template <int NH1>
+  static void accFullGen(const Net& n, const Pos& p, float* acc) { accFullImpl<NH1>(n, p, acc); }
+  template <int NH1>
+  __attribute__((target("avx2,fma"))) static void accUpdAvx2(const Net& n, const float* in, float* out, const Pos& c, const Delta& d) { accUpdateImpl<NH1>(n, in, out, c, d); }
+  template <int NH1>
+  static void accUpdGen(const Net& n, const float* in, float* out, const Pos& c, const Delta& d) { accUpdateImpl<NH1>(n, in, out, c, d); }
+  template <int NH1>
+  __attribute__((target("avx2,fma"))) static float evalAccAvx2(const Net& n, const Pos& p, const float* a) { return evalAccImpl<NH1>(n, p, a); }
+  template <int NH1>
+  static float evalAccGen(const Net& n, const Pos& p, const float* a) { return evalAccImpl<NH1>(n, p, a); }
+
+#define CZ_DISPATCH(fn, ...)                                                                   \
+  switch (H1) {                                                                                \
+    case 32: return avx2 ? fn##Avx2<32>(__VA_ARGS__) : fn##Gen<32>(__VA_ARGS__);              \
+    case 64: return avx2 ? fn##Avx2<64>(__VA_ARGS__) : fn##Gen<64>(__VA_ARGS__);              \
+    case 128: return avx2 ? fn##Avx2<128>(__VA_ARGS__) : fn##Gen<128>(__VA_ARGS__);           \
+    default: return avx2 ? fn##Avx2<256>(__VA_ARGS__) : fn##Gen<256>(__VA_ARGS__);            \
+  }
+  void accFull(const Pos& p, float* acc) const { CZ_DISPATCH(accFull, *this, p, acc) }
+  void accUpdate(const float* in, float* out, const Pos& child, const Delta& d) const {
+    CZ_DISPATCH(accUpd, *this, in, out, child, d)
+  }
+  float evalAcc(const Pos& p, const float* acc) const { CZ_DISPATCH(evalAcc, *this, p, acc) }
+#undef CZ_DISPATCH
+
   // Returns the logit of the side to move winning.
   float eval(const Pos& p) const {
     switch (H1) {

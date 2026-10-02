@@ -107,6 +107,13 @@ inline const Tables& T() {
 
 typedef int Move;  // cell * 6 + dir
 
+// Cells changed by a move, with their codes before it.
+struct Delta {
+  int n;
+  int cell[MAXH + 1];
+  uint8_t before[MAXH + 1];
+};
+
 struct Pos {
   uint8_t c[N];
   uint8_t stm;
@@ -150,7 +157,7 @@ struct Pos {
   }
 
   // Applies move m in place.
-  void make(Move m) {
+  void make(Move m, Delta* delta = nullptr) {
     const Tables& t = T();
     int cell = m / 6, d = m % 6;
     int mover = stm;
@@ -185,6 +192,10 @@ struct Pos {
       key ^= t.Z[x][o] ^ t.Z[x][f];
     }
     if (cap[mover] != cap0) key ^= t.Zcap[mover][cap0] ^ t.Zcap[mover][cap[mover] & 63];
+    if (delta) {
+      delta->n = nt;
+      for (int k = 0; k < nt; k++) { delta->cell[k] = touched[k]; delta->before[k] = orig[k]; }
+    }
     stm ^= 1;
     key ^= t.Zside;
     key ^= t.Zply[ply] ^ t.Zply[ply + 1];

@@ -12,7 +12,7 @@ enum P {
   P_OWNB, P_ENB,                       // own / enemy pieces buried in a controlled stack
   P_RING0, P_RING1, P_RING2, P_RING3, P_RING4,
   P_MOB,                               // per own move direction
-  P_LMR, P_NULL, P_QS, P_FUT, P_NNSCALE, P_LMP, P_ASP, P_LMRDIV, P_LMPD, P_FFUT,
+  P_LMR, P_NULL, P_QS, P_FUT, P_NNSCALE, P_LMP, P_ASP, P_LMRDIV, P_LMPD, P_FFUT, P_QSG,
   P_COUNT
 };
 
@@ -25,7 +25,7 @@ struct Params {
       0, 0,
       0, 0, 0, 0, 0,
       0,
-      1, 0, 1, 60, 170, 4, 150, 200, 3, 0,
+      1, 0, 1, 60, 170, 4, 150, 200, 3, 0, 0,
     };
     memcpy(v, d, sizeof v);
   }
@@ -34,7 +34,7 @@ struct Params {
 
 static const char* PNAMES[P_COUNT] = {
   "tempo", "h1", "h2", "h3", "h4", "h5", "ownb", "enb",
-  "ring0", "ring1", "ring2", "ring3", "ring4", "mob", "lmr", "null", "qs", "fut", "nnscale", "lmp", "asp", "lmrdiv", "lmpd", "ffut",
+  "ring0", "ring1", "ring2", "ring3", "ring4", "mob", "lmr", "null", "qs", "fut", "nnscale", "lmp", "asp", "lmrdiv", "lmpd", "ffut", "qsg",
 };
 
 constexpr int INF = 32000;
@@ -73,9 +73,22 @@ struct Searcher {
   Params pr;
   const Net* net = nullptr;
 
-  int eval(const Pos& p) const {
+  alignas(64) float accs[168][512];
+
+  void makeChild(const Pos& p, Pos& q, Move m, int ply) {
+    q = p;
     if (net) {
-      float v = net->eval(p) * pr.v[P_NNSCALE];
+      Delta d;
+      q.make(m, &d);
+      net->accUpdate(accs[ply], accs[ply + 1], q, d);
+    } else {
+      q.make(m);
+    }
+  }
+
+  int eval(const Pos& p, int ply) const {
+    if (net) {
+      float v = net->evalAcc(p, accs[ply]) * pr.v[P_NNSCALE];
       if (v > 15000) v = 15000;
       if (v < -15000) v = -15000;
       return (int)v;
@@ -161,24 +174,37 @@ struct Searcher {
     return 2 * (g + cp);
   }
 
-  int qsearch(const Pos& p, int alpha, int beta, int ply) {
+  int qsearch(const Pos& p, int alpha, int beta, int ply, int qply = 0) {
     nodes++;
     checkTime();
     if (stop) return 0;
     if (p.terminal()) return terminalValue(p);
-    int stand = eval(p);
+    int stand = eval(p, ply);
     if (stand >= beta) return stand;
     if (stand > alpha) alpha = stand;
+    // Only moves that cause a collapse. A collapse needs a stack of height >= 4 on the
+    // sowing path (a cell receives at most two pieces from one move).
+    const Tables& t = T();
+    bool tall[N];
+    int ntall = 0;
+    for (int i = 0; i < N; i++) { tall[i] = t.H[p.c[i]] >= 4; ntall += tall[i]; }
+    if (!ntall && !pr.v[P_QSG]) return stand;
     Move ms[400];
     int n = p.genMoves(ms);
-    // Only moves that cause a collapse.
     Move cm[64];
     int sc[64];
     int k = 0;
     for (int i = 0; i < n && k < 64; i++) {
+      if (!pr.v[P_QSG]) {
+        int c0 = ms[i] / 6, h0 = t.H[p.c[c0]];
+        const int8_t* w = t.walk[c0][ms[i] % 6];
+        bool any = false;
+        for (int j = 0; j < h0; j++) any |= tall[w[j]];
+        if (!any) continue;
+      }
       int cp;
       int g = gain(p, ms[i], &cp);
-      if (cp == 0) continue;
+      if (cp == 0 && !(pr.v[P_QSG] && qply < 2 && g >= pr.v[P_QSG])) continue;
       cm[k] = ms[i];
       sc[k] = g;
       k++;
@@ -188,9 +214,9 @@ struct Searcher {
       int bi = i;
       for (int j = i + 1; j < k; j++) if (sc[j] > sc[bi]) bi = j;
       if (bi != i) { std::swap(cm[i], cm[bi]); std::swap(sc[i], sc[bi]); }
-      Pos q = p;
-      q.make(cm[i]);
-      int v = -qsearch(q, -beta, -alpha, ply + 1);
+      Pos q;
+      makeChild(p, q, cm[i], ply);
+      int v = -qsearch(q, -beta, -alpha, ply + 1, qply + 1);
       if (stop) return 0;
       if (v > best) {
         best = v;
@@ -209,7 +235,7 @@ struct Searcher {
       if (pr.v[P_QS]) return qsearch(p, alpha, beta, ply);
       nodes++;
       checkTime();
-      return eval(p);
+      return eval(p, ply);
     }
     nodes++;
     checkTime();
@@ -228,7 +254,7 @@ struct Searcher {
     }
 
     int staticEval = -INF;
-    if (!pvNode && (pr.v[P_NULL] || pr.v[P_FUT] || pr.v[P_FFUT])) staticEval = eval(p);
+    if (!pvNode && (pr.v[P_NULL] || pr.v[P_FUT] || pr.v[P_FFUT])) staticEval = eval(p, ply);
 
     // Reverse futility pruning: far above beta near the leaves.
     if (pr.v[P_FUT] && !pvNode && depth <= 3 && staticEval - pr.v[P_FUT] * depth >= beta && staticEval < WIN / 2)
@@ -237,6 +263,7 @@ struct Searcher {
     // Null move pruning.
     if (pr.v[P_NULL] && allowNull && !pvNode && depth >= 3 && staticEval >= beta && p.ply + 1 < MAXPLY) {
       Pos q = p;
+      if (net) memcpy(accs[ply + 1], accs[ply], sizeof accs[0]);
       q.stm ^= 1;
       q.key ^= T().Zside ^ T().Zply[q.ply] ^ T().Zply[q.ply + 1];
       q.ply++;
@@ -248,44 +275,23 @@ struct Searcher {
       }
     }
 
-    Move ms[400];
-    int n = p.genMoves(ms);
-    int scores[400];
-    int gains[400];
-    const int* h = hist[p.stm];
-    for (int i = 0; i < n; i++) {
-      Move m = ms[i];
-      int g = gain(p, m);
-      gains[i] = g;
-      int s;
-      if (m == ttMove) s = 1 << 30;
-      else {
-        s = g * 100000;
-        if (m == killers[ply][0]) s += 50000;
-        else if (m == killers[ply][1]) s += 40000;
-        s += h[m];
-      }
-      scores[i] = s;
-    }
-
     int best = -INF;
     Move bestMove = -1;
     int origAlpha = alpha;
-    for (int i = 0; i < n; i++) {
-      int bi = i;
-      for (int j = i + 1; j < n; j++) if (scores[j] > scores[bi]) bi = j;
-      if (bi != i) {
-        std::swap(ms[i], ms[bi]); std::swap(scores[i], scores[bi]); std::swap(gains[i], gains[bi]);
-      }
-      Move m = ms[i];
+    int gain0 = 0;
+    const Tables& t = T();
+
+    // Searches move m as the i-th move. Returns 1 on a beta cutoff, 2 if time ran out.
+    auto tryMove = [&](Move m, int i, int g) -> int {
+      if (i == 0) gain0 = g;
       if (pr.v[P_LMP] && !pvNode && depth <= pr.v[P_LMPD] && i >= pr.v[P_LMP] * depth && best > -WIN / 2 &&
-          gains[i] <= 0 && m != killers[ply][0] && m != killers[ply][1])
-        continue;
-      if (pr.v[P_FFUT] && !pvNode && depth == 1 && i > 0 && gains[i] <= 0 && best > -WIN / 2 &&
+          g <= 0 && m != killers[ply][0] && m != killers[ply][1])
+        return 0;
+      if (pr.v[P_FFUT] && !pvNode && depth == 1 && i > 0 && g <= 0 && best > -WIN / 2 &&
           staticEval + pr.v[P_FFUT] <= alpha)
-        continue;
-      Pos q = p;
-      q.make(m);
+        return 0;
+      Pos q;
+      makeChild(p, q, m, ply);
       int v;
       if (i == 0) {
         v = -search(q, depth - 1, -beta, -alpha, ply + 1, pvNode, true);
@@ -298,7 +304,7 @@ struct Searcher {
           } else {
             red = 1;
             if (i >= 10 && depth >= 4) red = 2;
-            if (gains[i] < gains[0] - 2 && depth >= 5) red++;
+            if (g < gain0 - 2 && depth >= 5) red++;
           }
           if (red > depth - 2) red = depth - 2;
           if (red < 0) red = 0;
@@ -309,7 +315,7 @@ struct Searcher {
         if (!stop && v > alpha && v < beta && pvNode)
           v = -search(q, depth - 1, -beta, -alpha, ply + 1, true, true);
       }
-      if (stop) return 0;
+      if (stop) return 2;
       if (v > best) {
         best = v;
         bestMove = m;
@@ -320,10 +326,57 @@ struct Searcher {
             if (killers[ply][0] != m) { killers[ply][1] = killers[ply][0]; killers[ply][0] = m; }
             hist[p.stm][m] += depth * depth;
             if (hist[p.stm][m] > 30000) for (int k = 0; k < N * 6; k++) { hist[0][k] /= 2; hist[1][k] /= 2; }
-            break;
+            return 1;
           }
         }
       }
+      return 0;
+    };
+
+    int idx = 0;
+    int r = 0;
+    bool ttLegal = ttMove >= 0 && ttMove < N * 6 && t.TOP[p.c[ttMove / 6]] == p.stm && t.nb[ttMove / 6][ttMove % 6] >= 0;
+    if (ttLegal) {
+      r = tryMove(ttMove, idx++, gain(p, ttMove));
+      if (r == 2) return 0;
+    } else {
+      ttMove = -1;
+    }
+    if (r == 0) {
+      Move ms[400];
+      int n0 = p.genMoves(ms);
+      int64_t keys[400];
+      int gains[400];
+      Move mv[400];
+      int n = 0;
+      const int* h = hist[p.stm];
+      for (int i = 0; i < n0; i++) {
+        Move m = ms[i];
+        if (m == ttMove) continue;
+        int g = gain(p, m);
+        int sc = g * 100000;
+        if (m == killers[ply][0]) sc += 50000;
+        else if (m == killers[ply][1]) sc += 40000;
+        sc += h[m];
+        gains[n] = g;
+        mv[n] = m;
+        keys[n] = (int64_t)sc * 65536 + n;
+        n++;
+      }
+      const int PICK = 3;
+      for (int i = 0; i < n; i++) {
+        if (i < PICK) {
+          int bi = i;
+          for (int j = i + 1; j < n; j++) if (keys[j] > keys[bi]) bi = j;
+          std::swap(keys[i], keys[bi]);
+        } else if (i == PICK) {
+          std::sort(keys + PICK, keys + n, [](int64_t a, int64_t b) { return a > b; });
+        }
+        int k = (int)(keys[i] & 0xffff);
+        r = tryMove(mv[k], idx++, gains[k]);
+        if (r) break;
+      }
+      if (r == 2) return 0;
     }
 
     int flag = best >= beta ? TT_LOWER : (best > origAlpha ? TT_EXACT : TT_UPPER);
@@ -348,6 +401,7 @@ struct Searcher {
     age++;
     memset(killers, -1, sizeof killers);
     initLmr();
+    if (net) net->accFull(root, accs[0]);
     for (int k = 0; k < N * 6; k++) { hist[0][k] /= 8; hist[1][k] /= 8; }
     Move ms[400];
     int n = root.genMoves(ms);

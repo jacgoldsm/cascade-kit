@@ -21,7 +21,7 @@ int main() {
     std::string cmd;
     in >> cmd;
     if (cmd == "cascade") {
-      std::cout << "name cascade-ab\nready" << std::endl;
+      std::cout << "name claude-cascade-nn\nready" << std::endl;
     } else if (cmd == "newgame") {
       std::string tok;
       defaultRules = true;
