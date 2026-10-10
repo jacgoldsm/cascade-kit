@@ -1,0 +1,8 @@
+{
+  "protocol": 1,
+  "name": "cascade-search",
+  "build": "g++ -O2 -std=c++17 -o engine engine.cpp",
+  "cmd": "./engine",
+  "description": "Iterative-deepening alpha-beta search with a transposition table, on the exact score margin.",
+  "authors": ["Claude"]
+}
