@@ -1,9 +1,11 @@
-// Cascade engine: iterative-deepening alpha-beta (principal variation search) with
-// a transposition table and one-ply move ordering. The rules follow RULES.md and
-// cascade/rules.js; the board is rebuilt from CSN on every `position` command, so
-// the engine keeps no game history.
+// Cascade engine: iterative-deepening alpha-beta (principal variation search) with a
+// transposition table, quiescence search over collapses, late-move reduction and
+// one-ply move ordering. The rules follow RULES.md and cascade/rules.js. The board is
+// rebuilt from CSN on every `position` command, so the engine keeps no game history.
 //
 // `engine perft N [CSN]` counts move sequences for checking the rules (RULES.md §8).
+// `engine check` reads CSN positions and checks the incremental evaluation and
+// collapse detection against a full move application.
 
 #include <algorithm>
 #include <chrono>
@@ -28,12 +30,13 @@ constexpr int INF = 2000000;
 constexpr int TT_BITS = 20;
 constexpr uint64_t TT_MASK = (1ULL << TT_BITS) - 1;
 
-// Weight, in doubled-margin units, of each piece by which white outnumbers black on the
-// board. Fitted offline to the outcomes of self-play games (see the notes in the README
-// of the submission). Zero gives the plain score margin.
-#ifndef MAT_W
-#define MAT_W 1
-#endif
+// Static evaluation of a position that is not over, in doubled-margin units (a stack or
+// a captured piece is worth 2 here, as in the exact margin). Pieces still on the board
+// can yet become stacks or captures, so each net white piece counts MAT_W, and each
+// controlled stack counts STACK_W. Finished games are scored by the exact margin.
+// Both weights were chosen by self-play matches.
+constexpr int MAT_W = 2;
+constexpr int STACK_W = 1;
 
 const char* const DIR_NAMES[6] = {"E", "NE", "NW", "W", "SW", "SE"};
 const int DIR_DQ[6] = {1, 1, 0, -1, -1, 0};
@@ -283,13 +286,15 @@ int marginWhite2(const Board& s) {
   return 2 * (s.nStacks[0] + s.cap[0] - s.nStacks[1] - s.cap[1]) - G.komi2;
 }
 
-// Heuristic value for a position that is not over: the margin plus MAT_W times the
-// material balance, which tracks the pieces that will still be in play.
-int heuristicWhite2(int margin2, int mat) { return margin2 + MAT_W * mat; }
+// Heuristic value for a position that is not over: the exact margin, with the stack
+// and material terms re-weighted as described above.
+int heuristicWhite2(int margin2, int stackDiff, int mat) {
+  return margin2 + (STACK_W - 2) * stackDiff + MAT_W * mat;
+}
 
 // Static value for the side to move.
 int evalMover(const Board& s) {
-  const int m = heuristicWhite2(marginWhite2(s), s.mat);
+  const int m = heuristicWhite2(marginWhite2(s), s.nStacks[0] - s.nStacks[1], s.mat);
   return s.side == 0 ? m : -m;
 }
 
@@ -353,7 +358,7 @@ int quickAfter(const Board& s, int m, bool& terminal) {
   const int capB = s.cap[1] + (mover == 1 ? capGain : 0);
   terminal = s.ply + 1 >= G.maxply || nS[mover ^ 1] == 0;
   const int m2 = 2 * (nS[0] + capW - nS[1] - capB) - G.komi2;
-  const int v = heuristicWhite2(m2, mat);
+  const int v = heuristicWhite2(m2, nS[0] - nS[1], mat);
   return mover == 0 ? v : -v;
 }
 
@@ -490,9 +495,7 @@ struct Searcher {
           // Late quiet moves are searched shallower first; they are re-searched in full
           // only if they beat alpha.
           int r = 0;
-#ifndef NO_LMR
           if (depth >= 3 && i >= 4 && !collapses(s, mv[i])) r = i >= 10 ? 2 : 1;
-#endif
           v = -negamax(depth - 1 - r, -alpha - 1, -alpha, ply + 1);
           if (!stopped && r > 0 && v > alpha) v = -negamax(depth - 1, -alpha - 1, -alpha, ply + 1);
           if (!stopped && v > alpha && v < beta) v = -negamax(depth - 1, -beta, -alpha, ply + 1);
