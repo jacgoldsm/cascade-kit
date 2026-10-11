@@ -10,11 +10,12 @@ Elo anchored at greedy = 0, with 95% bootstrap intervals. Reference engines (in 
 | 4 | [opus-5-high](opus-5-high.md) |  | 1603 | [1519, 1710] | 320 | 92.2% | 0 | 68dc1e3 | 2026-10-02 |
 | 5 | *sonnet-5.5-100ms* (reference) | Claude Sonnet 5.5 (high effort) submission, limited to 100 ms per move | 1460 | [1379, 1574] | 280 | 88.6% | 0 |  | 2026-10-01 |
 | 6 | *sonnet-5.5-25ms* (reference) | Claude Sonnet 5.5 (high effort) submission, limited to 25 ms per move | 1063 | [986, 1166] | 280 | 69.6% | 0 |  | 2026-10-01 |
-| 7 | *sonnet-4.6-high* (reference) | Claude Sonnet 4.6 (high effort) submission | 785 | [705, 885] | 280 | 53.6% | 0 |  | 2026-10-01 |
-| 8 | [haiku-5.5-high](haiku-5.5-high.md) |  | 737 | [669, 816] | 320 | 51.2% | 0 | 5ab93d7 | 2026-10-10 |
-| 9 | *ab-250ms* (reference) | Alpha-beta search on the score margin, 250 ms per move | 652 | [589, 719] | 280 | 45.0% | 0 |  | 2026-10-01 |
-| 10 | *ab-25ms* (reference) | Alpha-beta search on the score margin, 25 ms per move | 440 | [393, 487] | 280 | 32.1% | 0 |  | 2026-10-01 |
-| 11 | *greedy* (reference) | Plays the move that maximises the immediate score (the 0 anchor) | 0 | [0, 0] | 280 | 11.4% | 0 |  | 2026-10-01 |
-| 12 | *mcts-250ms* (reference) | Plain Monte Carlo tree search with random playouts, 250 ms per move | -197 | [-294, -92] | 280 | 2.9% | 0 |  | 2026-10-01 |
-| 13 | [js-random](js-random.md) |  | -627 | [-700, -559] | 320 | 0.0% | 0 | 730f79c | 2026-10-01 |
-| 14 | [python-random](python-random.md) |  | -627 | [-697, -566] | 320 | 0.0% | 0 | 730f79c | 2026-10-01 |
+| 7 | [haiku-5.5-extra](haiku-5.5-extra.md) |  | 1026 | [953, 1111] | 320 | 65.6% | 0 | 1745bc6 | 2026-10-11 |
+| 8 | *sonnet-4.6-high* (reference) | Claude Sonnet 4.6 (high effort) submission | 785 | [705, 885] | 280 | 53.6% | 0 |  | 2026-10-01 |
+| 9 | [haiku-5.5-high](haiku-5.5-high.md) |  | 737 | [669, 816] | 320 | 51.2% | 0 | 5ab93d7 | 2026-10-10 |
+| 10 | *ab-250ms* (reference) | Alpha-beta search on the score margin, 250 ms per move | 652 | [589, 719] | 280 | 45.0% | 0 |  | 2026-10-01 |
+| 11 | *ab-25ms* (reference) | Alpha-beta search on the score margin, 25 ms per move | 440 | [393, 487] | 280 | 32.1% | 0 |  | 2026-10-01 |
+| 12 | *greedy* (reference) | Plays the move that maximises the immediate score (the 0 anchor) | 0 | [0, 0] | 280 | 11.4% | 0 |  | 2026-10-01 |
+| 13 | *mcts-250ms* (reference) | Plain Monte Carlo tree search with random playouts, 250 ms per move | -197 | [-294, -92] | 280 | 2.9% | 0 |  | 2026-10-01 |
+| 14 | [js-random](js-random.md) |  | -627 | [-700, -559] | 320 | 0.0% | 0 | 730f79c | 2026-10-01 |
+| 15 | [python-random](python-random.md) |  | -627 | [-697, -566] | 320 | 0.0% | 0 | 730f79c | 2026-10-01 |
