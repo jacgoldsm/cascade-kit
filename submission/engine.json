@@ -3,6 +3,6 @@
   "name": "cascade-ab",
   "build": "g++ -O2 -std=c++17 -o engine engine.cpp",
   "cmd": "./engine",
-  "description": "Alpha-beta search with iterative deepening, a transposition table, move ordering and quiescence over collapses. Evaluates the score margin.",
+  "description": "Alpha-beta search with iterative deepening and aspiration windows, a transposition table, killer and history ordering, late-move reductions, and quiescence over collapses. Evaluates the score margin with small terms for pieces on the board and tall stacks.",
   "authors": ["Claude"]
 }
