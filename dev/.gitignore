@@ -1,0 +1,13 @@
+# build outputs and scratch files
+eng_*
+train
+train2
+prof_eng
+head.cpp
+tail.cpp
+engine_float.cpp
+engine_dev_full.cpp
+engine_avx.cpp
+v0/
+t1.json
+gmon.out
